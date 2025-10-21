@@ -14,3 +14,6 @@ After cloning the repository and navigating into the project directory, install 
 pip install -r requirements.txt
 pip install -e .
 ```
+
+## Usage
+There is a short tutorial in the `notebooks` folder.
