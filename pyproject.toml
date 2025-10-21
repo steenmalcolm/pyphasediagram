@@ -1,0 +1,30 @@
+# ---------------------------------------
+# pyproject.toml for "pyphasediagram"
+# ---------------------------------------
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pyphasediagram"
+version = "0.1.0"
+description = "A Python package implementing fast calculations of the binodals of ternary systems."
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [
+  { name="Malcolm Steen", email="malcolm.steen@stud.uni-goettingen.de" }
+]
+keywords = ["example", "pyphasediagram"]
+classifiers = [
+  "Programming Language :: Python :: 3"
+]
+requires-python = ">=3.9"
+
+[project.optional-dependencies]
+dev = [
+  "pytest >= 6.0.0",
+]
+docs = [
+  "sphinx",
+]
