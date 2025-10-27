@@ -113,7 +113,7 @@ class PhaseDiagram:
         )
         return f
 
-    def characterize(self):
+    def characterize(self, delta: float = 1e-3) -> None:
         """Build the phase diagram: compute binodals, map to (phi_d, phi_r), and find 3-phase points."""
 
         chis = np.array([self.chi_dr, self.chi_rs, self.chi_ds])
@@ -132,7 +132,7 @@ class PhaseDiagram:
             )
             stepper = BinodalStepper(chi_matrix)
 
-            pos, _, _ = stepper.run()
+            pos, _, _ = stepper.run(delta=delta)
             # Map to phi_d-phi_r space
             for i in range(bin_i):
                 pos = np.einsum(
@@ -231,7 +231,13 @@ class PhaseDiagram:
 
         return alpha, beta, gamma
 
-    def phase_map(self):
+    def phase_map(self) -> list[np.ndarray]:
+        """
+        Determine the number of coexisting phases across the phase diagram.
+        A value of zero indicates two-phase coexistence and one indicates three-phase coexistence.
+        Anything in between indicates a transition along the tie line.
+        The shape of the output list is `N_binodals` arrays with shape `(N_triple_points, N_points, 2)`
+        """
         phase_counts_list = []
         for bin_idx, binodal_T in enumerate(self.binodals):
 
@@ -268,6 +274,9 @@ class PhaseDiagram:
                     - b[1] * free_en_tp[1]
                     - c[1] * free_en_tp[2]
                 )
+                # Edge case when both coefficients are zero
+                coeff1[coeff1 == 0] = -1e-10
+                coeff2[coeff2 == 0] = -1e-10
                 phase_count = np.zeros(
                     (binodal.shape[-1], 2)
                 )  # shape (N_points, N_phases)
@@ -316,29 +325,44 @@ class PhaseDiagram:
         ):
             two_phase = phase_counts.sum(axis=1) == 0.0
             three_phase = phase_counts.sum(axis=1) == 2.0
-            plt.fill(
-                np.append(binodal[0, 0][two_phase], binodal[1, 0][two_phase][::-1]),
-                np.append(binodal[0, 1][two_phase], binodal[1, 1][two_phase][::-1]),
-                color="orange",
-                zorder=2,
-            )
+
+            # Tie lines within two-phase region
+            two_edges = np.diff(two_phase.astype(int))
+            starts = np.where(two_edges == 1)[0] + 1
+            ends = np.where(two_edges == -1)[0] + 1
+            # for start, end in zip(starts, ends):
+            # plt.fill(
+            #     np.append(binodal[0, 0, start:end], binodal[1, 0, start:end][::-1]),
+            #     np.append(binodal[0, 1, start:end], binodal[1, 1, start:end][::-1]),
+            #     color="orange",
+            #     zorder=2,
+            # )
+
             # Transition along the binodal
             two_three_phase = ~(two_phase | three_phase)
-            pc = phase_counts[two_three_phase]
-            b = binodal[:, :, two_three_phase]
-            # Plot three phase region
-            # Plot two phase region
-            x1 = b[0, 0] + (b[1, 0] - b[0, 0]) * pc[:, 0]
-            y1 = b[0, 1] + (b[1, 1] - b[0, 1]) * pc[:, 0]
-            x2 = b[0, 0] + (b[1, 0] - b[0, 0]) * pc[:, 1]
-            y2 = b[0, 1] + (b[1, 1] - b[0, 1]) * pc[:, 1]
-            plt.fill(
-                np.append(x1, x2[::-1]),
-                np.append(y1, y2[::-1]),
-                color="orange",
-                zorder=2,
-            )
+            # Find disjoint segments where transition is along the binodal
+            ttp_edges = np.diff(two_three_phase.astype(int))
+            starts = np.where(ttp_edges == 1)[0] + 1
+            ends = np.where(ttp_edges == -1)[0] + 1
+            # Handle edge cases (condition true at array boundaries)
+            if two_three_phase[0]:
+                starts = np.r_[0, starts]
+            if two_three_phase[-1]:
+                ends = np.r_[ends, len(two_three_phase)]
 
+            for j, (start, end) in enumerate(zip(starts, ends)):
+                pc = phase_counts[start:end]
+                b = binodal[:, :, start:end]
+                x1 = b[0, 0] + (b[1, 0] - b[0, 0]) * pc[:, 0]
+                y1 = b[0, 1] + (b[1, 1] - b[0, 1]) * pc[:, 0]
+                x2 = b[0, 0] + (b[1, 0] - b[0, 0]) * pc[:, 1]
+                y2 = b[0, 1] + (b[1, 1] - b[0, 1]) * pc[:, 1]
+                plt.fill(
+                    np.append(x1, x2[::-1]),
+                    np.append(y1, y2[::-1]),
+                    color="orange",
+                    zorder=2,
+                )
             # Plot binodals outside of three-phase region
             bin_poly = Polygon(np.hstack((binodal[0], binodal[1, :, ::-1])).T)
             if not bin_poly.is_valid:
@@ -346,7 +370,7 @@ class PhaseDiagram:
             diff = bin_poly.difference(tp_poly)
             if diff.geom_type == "Polygon":
                 x, y = diff.exterior.xy
-                plt.fill(x, y, color="red", zorder=3)
+                plt.fill(x, y, color="orange", zorder=3)
             elif diff.geom_type == "MultiPolygon":
                 for p in diff.geoms:
                     x, y = p.exterior.xy

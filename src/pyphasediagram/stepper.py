@@ -19,14 +19,13 @@ class BinodalStepper:
 
     """
 
-    # Step size for moving along the binodal
-    delta = 1e-3
     # Max number of steps for run
     max_steps = 40000
     eps = 1e-12
 
     def __init__(self, chi_matrix: np.ndarray):
         self.chi_mat = chi_matrix
+        # Step size for moving along the binodal
 
     @staticmethod
     def phase_distance(phi):
@@ -81,6 +80,7 @@ class BinodalStepper:
         # sign to compute difference between phases
         s = np.array([1.0, -1.0])
 
+        # Three conditions and four variables
         J = np.zeros((3, 4))
         # Row 0: d(mu0)/d(...)
         J[0, ::2] = s * (inv_x + inv_z + c[0, 0])  # dmu0/dx0, dmu0/dx1
@@ -170,7 +170,7 @@ class BinodalStepper:
 
         return phi
 
-    def run(self) -> None:
+    def run(self, delta=1e-3) -> None:
         """Executes the stepping procedure and returns the binodal compositions."""
 
         phi_new = self.init_point()
@@ -195,7 +195,7 @@ class BinodalStepper:
             else:
                 v_t *= np.sign(np.dot(v_t, phi_list[-1] - phi_list[-2]))
 
-            phi_new += v_t * self.delta
+            phi_new += v_t * delta
             res_new = self.residual(phi_new)
 
             # Project back to coexistence line
