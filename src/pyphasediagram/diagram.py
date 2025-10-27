@@ -1,6 +1,7 @@
+# %%
 import numpy as np
 import itertools
-from shapely.geometry import LineString
+from shapely.geometry import LineString, Polygon
 import matplotlib.pyplot as plt
 from pyphasediagram.stepper import BinodalStepper
 
@@ -14,6 +15,7 @@ class PhaseDiagram:
     maps the resulting binodals into (phi_d, phi_r) space, detects three-phase
     coexistence points from binodal intersections, and finds the compositions of
     the coexisting phases given a mean composition.
+
     Parameters
     ----------
     chi_dr : float
@@ -35,6 +37,7 @@ class PhaseDiagram:
         self.binodals = []
         self.three_phase_points = []
         self.tie_lines = []
+        self._d = []  # Denominators for barycentric coords
 
     def find_three_phase(self) -> None:
         """Finds intersection points between different binodals (three-phase coexistence)."""
@@ -54,9 +57,15 @@ class PhaseDiagram:
                         raise RuntimeWarning("Overlapping binodals detected")
 
                     for i, j in indices_list:
-                        self.three_phase_points.append(
-                            (phase11[i], phase12[i], phase22[j])
-                        )
+                        p1, p2, p3 = (phase11[i], phase12[i], phase22[j])
+                        self.three_phase_points.append((p1, p2, p3))
+
+        # Remove duplicates and calculate denominators for barycentric coords
+        self.three_phase_points = self.remove_duplicate_points(self.three_phase_points)
+        for p1, p2, p3 in self.three_phase_points:
+            self._d.append(
+                (p1[0] - p3[0]) * (p2[1] - p3[1]) - (p1[1] - p3[1]) * (p2[0] - p3[0])
+            )
 
     def intercept_indices(self, bin1: np.ndarray, bin2: np.ndarray):
         """Find approximate intersection indices between two binodal lines."""
@@ -88,6 +97,21 @@ class PhaseDiagram:
             results.append((i, j))
 
         return results
+
+    def free_energy(self, phi: np.ndarray) -> np.ndarray:
+        """Compute the dimensionless free energy density for given compositions."""
+        phi_d, phi_r = phi[0], phi[1]
+        phi_s = 1 - phi_d - phi_r
+
+        f = (
+            phi_d * np.log(phi_d)
+            + phi_r * np.log(phi_r)
+            + phi_s * np.log(phi_s)
+            + self.chi_dr * phi_d * phi_r
+            + self.chi_ds * phi_d * phi_s
+            + self.chi_rs * phi_r * phi_s
+        )
+        return f
 
     def characterize(self):
         """Build the phase diagram: compute binodals, map to (phi_d, phi_r), and find 3-phase points."""
@@ -128,7 +152,7 @@ class PhaseDiagram:
             self.binodals.append(pos)
         self.find_three_phase()
 
-    def get_composition(self, phi_m: np.ndarray) -> np.ndarray:
+    def get_compositions(self, phi_m: np.ndarray) -> np.ndarray:
         """Given a mean composition, return the compositions of coexisting phases."""
         comp = []
         for i, binodal in enumerate(self.binodals):
@@ -157,11 +181,199 @@ class PhaseDiagram:
 
         return comp
 
+    def remove_duplicate_points(self, lst, tol=1e-2):
+        """Removes tuples of points that are too similar to others in the list."""
+        unique = []
+        canonical_reps = []  # for fast comparison
+
+        for points in lst:
+            arr = np.vstack(points)
+            # For triangle each point is uniquely defined by its angle around the c.o.m.
+            arr_m = arr.mean(axis=0)
+            arr -= arr_m
+            arr = arr[np.argsort(np.arctan2(arr[:, 1], arr[:, 0]))]
+            arr += arr_m
+            canonical = arr.flatten()
+
+            # Check against existing ones
+            is_similar = False
+            for c in canonical_reps:
+                if np.allclose(c, canonical, atol=tol):
+                    is_similar = True
+                    break
+
+            if not is_similar:
+                unique.append(points)
+                canonical_reps.append(canonical)
+
+        return unique
+
+    def barycentric(self, phi_m: np.ndarray):
+        """
+        Compute (α, β, γ) such that phi_m = α phi^1 + β phi^2 + γ phi^3 and α+β+γ = 1.
+        """
+
+        if phi_m.ndim == 1:
+            alpha, beta, gamma = np.zeros((3, len(self._d)))
+        else:
+            alpha, beta, gamma = np.zeros((3, len(self._d), *phi_m.shape[1:]))
+
+        for i, ((p1, p2, p3), d) in enumerate(zip(self.three_phase_points, self._d)):
+            alpha[i] = (phi_m[0] - p3[0]) * (p2[1] - p3[1]) - (phi_m[1] - p3[1]) * (
+                p2[0] - p3[0]
+            )
+            alpha[i] /= d
+            beta[i] = (p1[0] - p3[0]) * (phi_m[1] - p3[1]) - (p1[1] - p3[1]) * (
+                phi_m[0] - p3[0]
+            )
+            beta[i] /= d
+            gamma[i] = 1 - alpha[i] - beta[i]
+
+        return alpha, beta, gamma
+
+    def phase_map(self):
+        phase_counts_list = []
+        for bin_idx, binodal_T in enumerate(self.binodals):
+
+            phase_counts = np.zeros(
+                (len(self.three_phase_points), binodal_T.shape[-1], 2)
+            )  # shape (N_triple_points, N_points)
+
+            # Transpose such that phase diagram coords are on axis zero
+            binodal = np.transpose(binodal_T, axes=(1, 0, 2))
+            free_en_bin = self.free_energy(binodal)  # shape (N_phases, N_points)
+            alpha, beta, gamma = self.barycentric(
+                binodal
+            )  # shape (N_triple_points, N_phases, N_points)
+            for tp_idx, tp_points in enumerate(self.three_phase_points):
+                print("bin_case: ", self.bin_cases[bin_idx])
+
+                free_en_tp = self.free_energy(
+                    np.array(tp_points).T
+                )  # shape (N_phases, )
+                a, b, c = (
+                    alpha[tp_idx],
+                    beta[tp_idx],
+                    gamma[tp_idx],
+                )
+                coeff1 = (
+                    free_en_bin[0]
+                    - a[0] * free_en_tp[0]
+                    - b[0] * free_en_tp[1]
+                    - c[0] * free_en_tp[2]
+                )
+                coeff2 = (
+                    free_en_bin[1]
+                    - a[1] * free_en_tp[0]
+                    - b[1] * free_en_tp[1]
+                    - c[1] * free_en_tp[2]
+                )
+                phase_count = np.zeros(
+                    (binodal.shape[-1], 2)
+                )  # shape (N_points, N_phases)
+                # The following cases should be mutually exclusive
+                # 1) The transition from 2 phase to 3 phase is along the tie line
+                lmd = coeff2 / (coeff2 - coeff1)
+                phase_count = (
+                    -1
+                    / 2
+                    * (np.sign(coeff1 - coeff2) - 1)
+                    * np.vstack((lmd, np.ones_like(lmd)))
+                    + 1
+                    / 2
+                    * (np.sign(coeff1 - coeff2) + 1)
+                    * np.vstack((np.zeros_like(lmd), lmd))
+                ).T
+                # 2) 2 phase free energy is always higher than 3 phase if binodal points
+                # themselves have a lower free energy than the weighted sum of the three phases
+                phase_count[((coeff1 > 0) & (coeff2 > 0))] = 1
+                # 3) 3 phase free energy is always higher than 2 phase always for opposite case
+                phase_count[((coeff1 < 0) & (coeff2 < 0))] = 0
+
+                phase_counts[tp_idx] = phase_count
+
+            phase_counts_list.append(phase_counts)
+        return phase_counts_list
+
+    def plot_phase_counts(self, tp_idx: int = 0):
+        # Only consider one tripple point
+        if len(self.three_phase_points) == 0:
+            print("This system has no three-phase coexistence points.")
+            self.plot_binodals()
+            return
+
+        tp_poly = Polygon(np.array(self.three_phase_points[tp_idx]))
+        all_poly = Polygon(np.array([[0, 0], [1, 0], [0, 1]]))
+        diff_all = all_poly.difference(tp_poly)
+        x, y = diff_all.exterior.xy
+        plt.fill(x, y, color="red", zorder=0)
+        x, y = tp_poly.exterior.xy
+        plt.fill(x, y, color="blue", zorder=2)
+        phase_counts_list = [pc[tp_idx] for pc in self.phase_map()]
+
+        for i, (phase_counts, binodal) in enumerate(
+            zip(phase_counts_list, self.binodals)
+        ):
+            two_phase = phase_counts.sum(axis=1) == 0.0
+            three_phase = phase_counts.sum(axis=1) == 2.0
+            plt.fill(
+                np.append(binodal[0, 0][two_phase], binodal[1, 0][two_phase][::-1]),
+                np.append(binodal[0, 1][two_phase], binodal[1, 1][two_phase][::-1]),
+                color="orange",
+                zorder=2,
+            )
+            # Transition along the binodal
+            two_three_phase = ~(two_phase | three_phase)
+            pc = phase_counts[two_three_phase]
+            b = binodal[:, :, two_three_phase]
+            # Plot three phase region
+            # Plot two phase region
+            x1 = b[0, 0] + (b[1, 0] - b[0, 0]) * pc[:, 0]
+            y1 = b[0, 1] + (b[1, 1] - b[0, 1]) * pc[:, 0]
+            x2 = b[0, 0] + (b[1, 0] - b[0, 0]) * pc[:, 1]
+            y2 = b[0, 1] + (b[1, 1] - b[0, 1]) * pc[:, 1]
+            plt.fill(
+                np.append(x1, x2[::-1]),
+                np.append(y1, y2[::-1]),
+                color="orange",
+                zorder=2,
+            )
+
+            # Plot binodals outside of three-phase region
+            bin_poly = Polygon(np.hstack((binodal[0], binodal[1, :, ::-1])).T)
+            if not bin_poly.is_valid:
+                bin_poly = bin_poly.buffer(0)
+            diff = bin_poly.difference(tp_poly)
+            if diff.geom_type == "Polygon":
+                x, y = diff.exterior.xy
+                plt.fill(x, y, color="red", zorder=3)
+            elif diff.geom_type == "MultiPolygon":
+                for p in diff.geoms:
+                    x, y = p.exterior.xy
+                    plt.fill(x, y, color="orange", zorder=3)
+        plt.xlabel(r"$\phi_r$")
+        plt.ylabel(r"$\phi_d$")
+        plt.xlim(0, 1)
+        plt.ylim(0, 1)
+        for p in self.three_phase_points[tp_idx]:
+            plt.scatter(p[0], p[1], s=30, color="black", zorder=4)
+
+        plt.text(
+            0.3,
+            0.8,
+            r"$\chi_{ds}=%.2f, \chi_{dr}=%.2f, \chi_{rs}=%.2f$"
+            % (self.chi_ds, self.chi_dr, self.chi_rs),
+            fontsize=12,
+        )
+        plt.show()
+        plt.close()
+
     def plot_binodals(self):
         """Quick visualization of binodals, tie-lines at triple points."""
 
         plt.figure(figsize=(6, 6))
         for i, binodal in enumerate(self.binodals):
+            print(f"Plotting binodal for case {self.bin_cases[i]}", binodal.shape)
             bin_case = self.bin_cases[i]
             plt.plot(binodal[0, 0], binodal[0, 1], color=self.cl_cases[i])
             plt.plot(
@@ -183,26 +395,16 @@ class PhaseDiagram:
                     alpha=0.5,
                 )
             # Plot a start
-            plt.scatter(
-                points[0][0],
-                points[0][1],
-                marker="*",
-                color="gold",
-                s=150,
-                edgecolors="k",
-                zorder=5,
-            )
-        for i in range(20):
-            phi_m = np.random.random(2)
-            while phi_m.sum() >= 1:
-                phi_m = np.random.random(2)
-            phi_comps = self.get_composition(phi_m)
-
-            plt.scatter(phi_m[0], phi_m[1], color="black", s=15)
-            for c in phi_comps:
-                if c.shape == (2, 2):
-                    plt.plot(c[:, 0], c[:, 1], "k-.", alpha=0.5, lw=0.5)
-                    plt.scatter(phi_m[0], phi_m[1], color="orange", s=15)
+            for p in points:
+                plt.scatter(
+                    p[0],
+                    p[1],
+                    marker="*",
+                    color="gold",
+                    s=150,
+                    edgecolors="k",
+                    zorder=5,
+                )
         plt.plot([0, 1], [1, 0], "k--")
         plt.text(
             0.3,
@@ -217,10 +419,3 @@ class PhaseDiagram:
 
         plt.xlim(0, 1)
         plt.ylim(0, 1)
-
-
-if __name__ == "__main__":
-    chi_ds, chi_dr, chi_rs = 2.66, 2.61, 2.62
-    diagram = PhaseDiagram(chi_dr, chi_rs, chi_ds)
-    diagram.characterize()
-    diagram.plot_binodals()
