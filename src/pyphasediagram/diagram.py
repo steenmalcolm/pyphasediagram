@@ -100,7 +100,7 @@ class PhaseDiagram:
 
     def free_energy(self, phi: np.ndarray) -> np.ndarray:
         """Compute the dimensionless free energy density for given compositions."""
-        phi_d, phi_r = phi[0], phi[1]
+        phi_d, phi_r = phi[1], phi[0]
         phi_s = 1 - phi_d - phi_r
 
         f = (
@@ -443,3 +443,4 @@ class PhaseDiagram:
 
         plt.xlim(0, 1)
         plt.ylim(0, 1)
+        plt.show()
