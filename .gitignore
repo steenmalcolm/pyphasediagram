@@ -1,5 +1,6 @@
 .venv
 data
+report
 **/__pycache__/
 *.png
 *.egg-info
