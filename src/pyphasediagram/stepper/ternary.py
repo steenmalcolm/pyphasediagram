@@ -3,7 +3,7 @@ import time
 import jax.numpy as jnp
 import numpy as np
 from scipy.optimize import root
-from pyphasediagram.stepper import BaseStepper
+from pyphasediagram.stepper.base import BaseStepper
 
 
 class TernaryStepper(BaseStepper):
@@ -74,77 +74,3 @@ class TernaryStepper(BaseStepper):
             iteration += 1
 
         return phi
-
-
-if __name__ == "__main__":
-    import numpy as np
-    import pyphasediagram as diag
-    import matplotlib.pyplot as plt
-
-    for i in range(10):
-        chi_ds, chi_dr, chi_rs = (
-            np.random.uniform(2.1, 4),
-            np.random.uniform(0.0, 1.5),
-            np.random.uniform(1.5, 2.0),
-        )
-        # chi_ds, chi_dr, chi_rs = (2.868522346358936, 0.08408085346877525, 1.9871917531982581)
-        chi_matrix = np.array(
-            [
-                [-2 * chi_dr, chi_ds - chi_dr - chi_rs],
-                [chi_ds - chi_dr - chi_rs, -2 * chi_rs],
-            ]
-        )
-
-        stepper = TernaryStepper(chi_matrix)
-        st_old = diag.BinodalStepperOld(chi_matrix)
-        phi_list, _, _ = st_old.run()
-        n = time.perf_counter()
-        phi_list = stepper.run()
-        print(f"Took {time.perf_counter()-n:.2f} seconds for JAX stepper")
-
-        phi_arr_jax = np.array(phi_list)
-        phi_r_den, phi_d_den, phi_r_dil, phi_d_dil = phi_arr_jax.T
-        plt.subplot(121)
-        plt.plot(phi_r_den, phi_d_den)
-        plt.plot(phi_r_dil, phi_d_dil)
-        plt.yticks([])
-        plt.xticks([])
-
-        n = time.perf_counter()
-        phi_arr, _, _ = st_old.run()
-        print(f"Took {time.perf_counter()-n:.2f} seconds for old stepper")
-
-        phi_r_den, phi_d_den, phi_r_dil, phi_d_dil = (
-            phi_arr[0, 0],
-            phi_arr[0, 1],
-            phi_arr[1, 0],
-            phi_arr[1, 1],
-        )
-        plt.subplot(122)
-        plt.plot(phi_r_den, phi_d_den)
-        plt.plot(phi_r_dil, phi_d_dil)
-        plt.yticks([])
-        plt.xticks([])
-        plt.tight_layout()
-        plt.savefig(f"delete_me_ternary_{i}.png")
-        plt.close()
-
-    # %%
-
-    N = 10000
-    phis = []
-    for i in range(N):
-        phi = np.random.random(4)
-        while phi[0] + phi[1] > 1 or phi[2] + phi[3] > 1:
-            phi = np.random.random(4)
-        phis.append(phi)
-
-    n = time.perf_counter()
-    for i in range(N):
-
-        J1 = stepper._jac_fn(phis[i])
-        J2 = st_old.jacobian(phis[i])
-        assert np.allclose(J1, J2), f"Jacobian mismatch for phi={phis[i]}"
-        v_n1 = stepper.projection(phis[i])[0]
-        v_n2 = st_old.projection(phis[i])
-        assert np.allclose(v_n1, v_n2), f"Projection mismatch for phi={phis[i]}"

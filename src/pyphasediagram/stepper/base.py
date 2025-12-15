@@ -24,17 +24,14 @@ class BaseStepper(ABC):
     @abstractmethod
     def residual(self, phi: jnp.ndarray) -> jnp.ndarray:
         """Return chemical potential and osmotic pressure differences between phases."""
-        pass
 
     @abstractmethod
     def phi_init(self) -> jnp.ndarray:
         """Return initial feasible point on coexistence curve, shape (N,)."""
-        pass
 
     @abstractmethod
     def is_terminate(self, phi: jnp.ndarray) -> bool:
         """Return True to stop tracing."""
-        pass
 
     def tangent_vec(self, phi: jnp.ndarray) -> jnp.ndarray:
         """Vector in the nullspace of jacobian"""

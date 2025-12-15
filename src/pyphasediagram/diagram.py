@@ -1,9 +1,33 @@
-# %%
 import numpy as np
 import itertools
 from shapely.geometry import LineString, Polygon
 import matplotlib.pyplot as plt
-from pyphasediagram import TernaryStepper
+
+from pyphasediagram.stepper.ternary import TernaryStepper
+
+
+def spinodal(chi_11, chi_22, chi_12):
+    a, b, c = chi_11, chi_22, chi_12
+    a, b, c = -2 * chi_22, -2 * chi_12, chi_11 - chi_22 - chi_12
+    d = a * b - c**2
+    y = np.linspace(0, 1, 100000)
+    p_y = (2 * y * c - a - y * (1 - y) * d) / (a + d * y)
+    q_y = (1 + y * (1 - y) * b) / (a + d * y)
+    x_mn, x_pl = -p_y / 2 - 0.5 * np.sqrt(p_y**2 + 4 * q_y), -p_y / 2 + 0.5 * np.sqrt(
+        p_y**2 + 4 * q_y
+    )
+
+    idx_real = ~(np.isnan(x_mn) | np.isinf(x_mn))
+    y = y[idx_real]
+    x_pl = x_pl[idx_real]
+    x_mn = x_mn[idx_real]
+    idx_domain = (x_mn > 0) & (y + x_mn < 1)
+    y_mn = y[idx_domain]
+    x_mn = x_mn[idx_domain]
+    idx_domain = (x_pl > 0) & (y + x_pl < 1)
+    x_pl = x_pl[idx_domain]
+    y_pl = y[idx_domain]
+    return x_mn, y_mn, x_pl, y_pl
 
 
 class PhaseDiagram:
@@ -314,11 +338,11 @@ class PhaseDiagram:
         all_poly = Polygon(np.array([[0, 0], [1, 0], [0, 1]]))
         diff_all = all_poly.difference(tp_poly)
         x, y = diff_all.exterior.xy
-        plt.fill(x, y, color="red", zorder=0)
+        plt.fill(x, y, color="red", zorder=0, label="1-phase")
         x, y = tp_poly.exterior.xy
-        plt.fill(x, y, color="blue", zorder=2)
+        plt.fill(x, y, color="blue", zorder=2, label="3-phase")
         phase_counts_list = [pc[tp_idx] for pc in self.phase_map()]
-
+        two_phase_label = "2-phase"
         for i, (phase_counts, binodal) in enumerate(
             zip(phase_counts_list, self.binodals)
         ):
@@ -329,13 +353,6 @@ class PhaseDiagram:
             two_edges = np.diff(two_phase.astype(int))
             starts = np.where(two_edges == 1)[0] + 1
             ends = np.where(two_edges == -1)[0] + 1
-            # for start, end in zip(starts, ends):
-            # plt.fill(
-            #     np.append(binodal[0, 0, start:end], binodal[1, 0, start:end][::-1]),
-            #     np.append(binodal[0, 1, start:end], binodal[1, 1, start:end][::-1]),
-            #     color="orange",
-            #     zorder=2,
-            # )
 
             # Transition along the binodal
             two_three_phase = ~(two_phase | three_phase)
@@ -361,7 +378,9 @@ class PhaseDiagram:
                     np.append(y1, y2[::-1]),
                     color="orange",
                     zorder=2,
+                    label=two_phase_label,
                 )
+                two_phase_label = None
             # Plot binodals outside of three-phase region
             bin_poly = Polygon(np.hstack((binodal[0], binodal[1, :, ::-1])).T)
             if not bin_poly.is_valid:
@@ -369,13 +388,26 @@ class PhaseDiagram:
             diff = bin_poly.difference(tp_poly)
             if diff.geom_type == "Polygon":
                 x, y = diff.exterior.xy
-                plt.fill(x, y, color="orange", zorder=3)
+                if not is_two_phase_label:
+                    plt.fill(
+                        x,
+                        y,
+                        color="orange",
+                        zorder=3,
+                        label=two_phase_label,
+                    )
+                    two_phase_label = None
+                else:
+                    plt.fill(x, y, color="orange", zorder=3)
             elif diff.geom_type == "MultiPolygon":
                 for p in diff.geoms:
                     x, y = p.exterior.xy
                     plt.fill(x, y, color="orange", zorder=3)
-        plt.xlabel(r"$\phi_r$")
-        plt.ylabel(r"$\phi_d$")
+        plt.xlabel(r"$\phi_1$")
+        plt.ylabel(r"$\phi_2$")
+        plt.legend()
+        plt.xticks([0, 1])
+        plt.yticks([0, 1])
         plt.xlim(0, 1)
         plt.ylim(0, 1)
         for p in self.three_phase_points[tp_idx]:
@@ -384,8 +416,8 @@ class PhaseDiagram:
         plt.text(
             0.3,
             0.8,
-            r"$\chi_{ds}=%.2f, \chi_{dr}=%.2f, \chi_{rs}=%.2f$"
-            % (self.chi_ds, self.chi_dr, self.chi_rs),
+            r"$\chi_{12}=%.2f, \chi_{13}=%.2f, \chi_{23}=%.2f$"
+            % (self.chi_dr, self.chi_rs, self.chi_ds),
             fontsize=12,
         )
         plt.show()
@@ -427,6 +459,9 @@ class PhaseDiagram:
                     edgecolors="k",
                     zorder=5,
                 )
+        x_mn, y_mn, x_pl, y_pl = spinodal(self.chi_dr, self.chi_rs, self.chi_ds)
+        plt.scatter(x_mn, y_mn, s=1, color="orange", label="spinodal")
+        plt.scatter(x_pl, y_pl, s=1, color="orange")
         plt.plot([0, 1], [1, 0], "k--")
         plt.text(
             0.3,
@@ -442,101 +477,3 @@ class PhaseDiagram:
         plt.xlim(0, 1)
         plt.ylim(0, 1)
         plt.show()
-
-
-# %%
-
-chi_dr, chi_rs, chi_ds = np.random.uniform(2.2, 3.5, 3)
-# chi_dr, chi_rs, chi_ds = 2.8, 2.8, 2.8
-# chi_dr, chi_rs, chi_ds = 2.9, 2.77, 2.83
-diagram = PhaseDiagram(chi_dr=chi_dr, chi_rs=chi_rs, chi_ds=chi_ds)
-pos = diagram.characterize(delta=1e-3)
-diagram.plot_binodals()
-diagram.plot_phase_counts(0)
-
-
-# %%
-plt.figure(figsize=(12, 12))
-triple_points = diagram.three_phase_points[0]
-triple_points = sorted(triple_points, key=lambda x: x[1])
-tp_colors = ["red", "green", "blue"]
-for i, tp in enumerate(triple_points):
-    plt.axhline(diagram.free_energy(tp), color="k", linestyle="--", c=tp_colors[i])
-
-bin_colors = ["red", "blue", "green", "orange", "purple", "brown"]
-for i, binodal in enumerate(diagram.binodals):
-    if i == 1:
-        continue
-    bin_case = diagram.bin_cases[i]
-    for j, phase in enumerate(binodal):
-        a, b, c = diagram.barycentric(phase)
-        mask = (a[0] > 0) & (b[0] > 0) & (c[0] > 0)
-        starts = np.where(np.diff(mask.astype(int)) == 1)[0] + 1
-        ends = np.where(np.diff(mask.astype(int)) == -1)[0] + 1
-        if mask[0]:
-            starts = np.r_[0, starts]
-        if mask[-1]:
-            ends = np.r_[ends, len(mask)]
-        for start, end in zip(starts, ends):
-            plt.axvline(start, linestyle="--", color=bin_colors[2 * i + j], alpha=0.5)
-            plt.axvline(end, linestyle="--", color=bin_colors[2 * i + j], alpha=0.5)
-
-        free_en = diagram.free_energy(phase)
-        plt.plot(free_en, label=f"{bin_case}", color=bin_colors[2 * i + j])
-
-# plt.ylim(-0.1155, -0.114)
-# plt.xlim(8000, 8200)
-plt.legend()
-
-# %%
-plt.figure(figsize=(12, 12))
-pc = diagram.phase_map()[0][0]
-# pc = pc[pc.sum(axis=1) > 0.0]
-# pc = pc[pc.sum(axis=1) < 2.0]
-plt.plot(pc[:, 0])
-plt.plot(pc[:, 1])
-
-plt.xlim(8000, 8200)
-# plt.xlim(769,784)
-
-# %%
-bin1 = diagram.binodals[0]
-plt.plot(bin1[0, 0], bin1[0, 1], color="blue")
-plt.plot(bin1[1, 0], bin1[1, 1], color="blue")
-# bin2 = diagram.binodals[1][:,:,769:867]
-# bin2 = diagram.binodals[0][:, :, 740:1030]
-# bin2 = diagram.binodals[0][:, :, 973:1026]
-plt.plot(bin1[0, 0, 2000:8000], bin1[0, 1, 2000:8000], color="red")
-plt.plot(bin1[1, 0, 2000:8000], bin1[1, 1, 2000:8000], color="red")
-# plt.scatter(bin1[0, 0, 1888], bin1[0, 1,1888], s=100, color="green")
-# plt.scatter(bin1[1, 0, 1888], bin1[1, 1,1888], s=100, color="green")
-plt.plot(bin1[:, 0, ::500], bin1[:, 1, ::500], color="black", alpha=1, lw=0.2)
-tp = diagram.three_phase_points[0]
-# for p in tp:
-#     plt.scatter(p[0], p[1], s=50, color="black")
-# %%
-pc = diagram.phase_map()[0][0]
-plt.plot(pc[:, 0], color="red")
-plt.plot(pc[:, 1], color="blue")
-# %%
-c1, c2 = diagram.phase_map()
-is_tt = (c1 * c2) < 0
-c1[is_tt] = np.nan
-c2[is_tt] = np.nan
-# %%
-plt.plot(c1)
-plt.plot(c2)
-plt.axhline(0, color="k", linestyle="--")
-# plt.xlim(700,1100)
-# plt.ylim(-0.005,0.01)
-# %%
-coeff1, coeff2 = diagram.phase_map()
-c1, c2 = coeff1, coeff2
-# %%
-lmd = coeff2 / (coeff2 - coeff1)
-phase_count = (
-    -1 / 2 * (np.sign(coeff1 - coeff2) - 1) * np.vstack((lmd, np.ones_like(lmd)))
-    + 1 / 2 * (np.sign(coeff1 - coeff2) + 1) * np.vstack((np.zeros_like(lmd), lmd))
-).T
-#
-# %%
