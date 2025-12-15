@@ -1,9 +1,9 @@
 # Phase Diagram Analysis for Ternary Flory–Huggins Systems
 
 This project provides tools to **compute and analyze ternary phase diagrams** based on the **Flory–Huggins free energy model**.  
-It includes two core components:
+It includes two core classes:
 
-- **`BinodalStepper`** – numerically traces a binodal (coexistence) curve between two phases by expanding the coexistence manifold
+- **`TernaryStepper`** – numerically traces a binodal (coexistence) curve between two phases by expanding the coexistence manifold
 - **`PhaseDiagram`** – add binodal branches to a full ternary phase diagram and locate three-phase coexistence points
 
 ## Installation

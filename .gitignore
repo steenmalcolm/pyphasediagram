@@ -4,3 +4,4 @@ report
 **/__pycache__/
 *.png
 *.egg-info
+src/pyphasediagram/depr
