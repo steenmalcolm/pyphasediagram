@@ -5,3 +5,4 @@ report
 *.png
 *.egg-info
 src/pyphasediagram/depr
+.DS_Store
