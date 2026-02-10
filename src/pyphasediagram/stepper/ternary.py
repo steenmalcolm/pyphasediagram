@@ -1,3 +1,4 @@
+# %%
 import time
 
 import jax.numpy as jnp
@@ -60,7 +61,7 @@ class TernaryStepper(BaseStepper):
         iteration = 0
 
         while np.linalg.norm(res) > 1e-8:
-            v, res = self.projection(phi)
+            v, res, _ = self.projection(phi)
             if not self.is_terminate(phi + v):
                 phi = phi + v
             else:
@@ -74,3 +75,62 @@ class TernaryStepper(BaseStepper):
             iteration += 1
 
         return phi
+
+
+if __name__ == "__main__":
+    import matplotlib.pyplot as plt
+    import time
+    from scipy.linalg import null_space
+
+    chi = 2.7
+    chi_12, chi_13, chi_23 = 3, 1.5, 1.5
+    chi_matrix = np.array(
+        [
+            [-2 * chi_13, chi_12 - chi_13 - chi_23],
+            [chi_12 - chi_13 - chi_23, -2 * chi_23],
+        ]
+    )
+    obj = TernaryStepper(chi_matrix)
+    n = time.perf_counter()
+    obj.run(delta0=1e-3)
+    print(f"took {time.perf_counter() - n:.2f} seconds")
+
+    # %%
+    print(len(obj.bins_list))
+    plt.figure(figsize=(10, 10))
+    colormap = plt.cm.viridis
+    for i, b in enumerate(obj.bins_list):
+
+        print(b.shape)
+        plt.plot(b[0, 0], b[0, 1], "r")
+        plt.plot(b[1, 0], b[1, 1], "b")
+        color = colormap(i / len(obj.bins_list))
+        plt.scatter(b[0, 0, 0], b[0, 1, 0], color=color, s=10, alpha=0.5)
+        plt.scatter(b[1, 0, 0], b[1, 1, 0], color=color, s=10, alpha=0.5)
+        plt.scatter(b[0, 0, -1], b[0, 1, -1], color=color, s=10, alpha=0.5)
+        plt.scatter(b[1, 0, -1], b[1, 1, -1], color=color, s=10, alpha=0.5)
+        if abs()
+        plt.xlim(0, 1)
+        plt.ylim(0, 1)
+        plt.xticks([])
+        plt.yticks([])
+    # %%
+    for i, b in enumerate(obj.bins_list):
+        bt = b.reshape(4, -1).T
+        s_list = []
+        idx = 0
+        for j, bi in enumerate(bt):
+            # SVD of Jacobian
+            Vt, S, Vt = np.linalg.svd(obj._jac_fn(bi), full_matrices=False)
+            if abs(bi[:2].mean() - 0.388888) < 1e-3:
+                idx = j
+            s_list.append(S.min())
+        plt.subplot(3, 1, i + 1)
+        plt.plot(s_list)
+        if idx > 0:
+            plt.axvline(idx, color="r")
+        plt.yscale("log")
+
+# %%
+bi
+# %%

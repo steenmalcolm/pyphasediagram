@@ -2,7 +2,7 @@
 import time
 import jax.numpy as jnp
 import numpy as np
-from pyphasediagram.stepper import BaseStepper
+from pyphasediagram.stepper.base import BaseStepper
 import flory
 
 
