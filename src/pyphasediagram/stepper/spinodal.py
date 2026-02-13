@@ -34,8 +34,8 @@ class SpinodalPoint:
             )
         return np.array([self.phi1 - pt.phi1, self.phi2 - pt.phi2])
 
-    def plot(self, s=10, color=None):
-        plt.scatter(self.phi1, self.phi2, s=s, color=color)
+    def plot(self, s=10, **kwargs):
+        plt.scatter(self.phi1, self.phi2, s=s, **kwargs)
 
     def is_between(self, pt1, pt2, tol=np.pi / 8):
         """
@@ -57,6 +57,7 @@ class Spinodal:
         self.chis = chis
         self.spinodal_graph = nx.Graph()
         self.node_id = 0
+        self.critical_points = []
 
     def build(self):
         """
@@ -68,6 +69,7 @@ class Spinodal:
             self._domain_data(phi1_domains[i], phi1_domains[i + 1])
         self._clip_to_domain()
         self._connect_branches()
+        self._find_critical_points()
 
     def _get_p_q(self, phi, is_calculate_phi2=True):
         """
@@ -93,7 +95,7 @@ class Spinodal:
         Compute the spinodal branches for phi1 in [phi1_i, phi1_f]
         and add them to the graph as nodes with attributes phi1, phi2, and pos=(phi1, phi2).
         """
-        num_points = 1000
+        num_points = 5000
         dphi1 = (phi1_f - phi1_i) / num_points
         phi1_vals = np.linspace(phi1_i, phi1_f, num_points)
         phi2_branches = self.phi2_from_phi1(phi1_vals)
@@ -194,6 +196,68 @@ class Spinodal:
                         # Call recursively because graph structure has changed
                         return self._connect_branches()
 
+    def _coords_from_subgraph(self, sg):
+        """
+        Extract phi1 and phi2 coordinates from a subgraph's nodes. In the correct order.
+        Returns two lists: phi1s and phi2s.
+        """
+        # Find endpoint (degree 1) if it exists (path case)
+        endpoints = [n for n, d in sg.degree() if d == 1]
+
+        if endpoints:
+            start = endpoints[0]
+        else:
+            # cycle case (all degree 2)
+            start = next(iter(sg.nodes()))
+
+        ordered_points = list(nx.dfs_preorder_nodes(sg, source=start))
+
+        phi1s = np.array([n.phi1 for n in ordered_points])
+        phi2s = np.array([n.phi2 for n in ordered_points])
+        return phi1s, phi2s
+
+    def _third_derivative(self, phi1, phi2):
+        phi0 = 1 - phi1 - phi2
+        H_11 = 1 / phi1 + 1 / phi0 + self.chis[0, 0]
+        H_12 = 1 / phi0 + self.chis[0, 1]
+        return H_12**3 / (phi1**2) - H_11**3 / (phi2**2) + (H_11 - H_12) ** 3 / phi0**2
+
+    def _find_critical_points(self):
+        for comp in nx.connected_components(self.spinodal_graph):
+
+            sg = self.spinodal_graph.subgraph(comp)
+            phi1, phi2 = self._coords_from_subgraph(sg)
+
+            third_deriv = self._third_derivative(phi1, phi2)
+            if np.isnan(third_deriv).any():
+                raise ValueError(
+                    "NaN values found in third derivative, check for invalid phi1/phi2 values."
+                )
+            # d = 1000000
+            # third_deriv[third_deriv > d] = d
+            # third_deriv[third_deriv < -d] = -d
+
+            # Find roots of third derivative
+            roots = np.where(np.diff(np.sign(third_deriv)))[0]
+
+            for root in roots:
+                # For np.interp to work, we need to ensure the third_deriv values at root and root+1 are in increasing order. If not, swap them.
+                xp = third_deriv[root : root + 2]
+                phi1p, phi2p = phi1[root : root + 2], phi2[root : root + 2]
+                order = np.argsort(third_deriv[root : root + 2])
+                phi1_c = np.interp(0, xp[order], phi1p[order])
+                phi2_c = np.interp(0, xp[order], phi2p[order])
+                td_c = self._third_derivative(phi1_c, phi2_c)
+                if td_c > 1e-2:
+                    Warning(
+                        f"Third derivative at critical point ({phi1_c:.2f}, {phi2_c:.2f}) is quite large: {td_c:.5f}.\nTry increasing resolution of spinodal curve."
+                    )
+                assert abs(td_c) < np.std(
+                    xp
+                ), f"Third derivative at critical point ({phi1_c:.2f}, {phi2_c:.2f}) is not close to zero: {td_c:.5f}\n(chi_11, chi_22, chi_12)=({self.chis[0, 0]}, {self.chis[1, 1]}, {self.chis[0, 1]})\nTry increasing resolution of spinodal curve."
+
+                self.critical_points.append(SpinodalPoint(-1, phi1_c, phi2_c))
+
     def plot(self):
         a, b, c = self.chis[0, 0], self.chis[1, 1], self.chis[0, 1]
         plt.figure()
@@ -201,63 +265,41 @@ class Spinodal:
             r"$(\chi_{11}, \chi_{22}, \chi_{12})$ = " + f"({a:.5f}, {b:.5f}, {c:.5f})"
         )
         for i, comp in enumerate(nx.connected_components(self.spinodal_graph)):
-            H = self.spinodal_graph.subgraph(comp)
+            sg = self.spinodal_graph.subgraph(comp)
 
             # Find endpoint (degree 1) if it exists (path case)
-            endpoints = [n for n, d in H.degree() if d == 1]
-
-            if endpoints:
-                start = endpoints[0]
-            else:
-                # cycle case (all degree 2)
-                start = next(iter(H.nodes()))
-
-            ordered_nodes = list(nx.dfs_preorder_nodes(H, source=start))
-
-            xs = [n.phi1 for n in ordered_nodes]
-            ys = [n.phi2 for n in ordered_nodes]
-            if np.isnan(ys).any():
+            phi1s, phi2s = self._coords_from_subgraph(sg)
+            if np.isnan(phi2s).any():
                 print("NaN values found in ys, skipping plot for this component.")
-            plt.plot(xs, ys)
-            plt.scatter(xs[0], ys[0], alpha=0.45)
-            plt.scatter(xs[-1], ys[-1], alpha=0.45)
+            if i == 0:
+                plt.plot(phi1s, phi2s, label="Spinodal curve")
+            else:
+                plt.plot(phi1s, phi2s)
+            # plt.scatter(phi1s[0], phi2s[0], alpha=0.45)
+            # plt.scatter(phi1s[-1], phi2s[-1], alpha=0.45)
+        for i, crit_pt in enumerate(self.critical_points):
+            if i == 0:
+                crit_pt.plot(s=50, color="red", label="Critical point")
+            else:
+                crit_pt.plot(s=50, color="red")
         plt.xlim(0, 1)
         plt.ylim(0, 1)
         plt.plot([0, 1], [1, 0], "k--")
 
-        plt.xlabel("x")
-        plt.ylabel("y")
-
-
-def apply_per_component(
-    G: nx.Graph,
-    func,
-):
-    """
-    Apply func(x,y) -> (u,v) to every node.
-    Return: list_of_lists, where each inner list corresponds to one connected component
-            and contains the function outputs for nodes in that component.
-
-    Notes:
-    - Components are returned in arbitrary order.
-    - Node order inside each component is arbitrary; if you want a geometric order
-      along the curve, see the optional ordering snippet below.
-    """
-    component_outputs = []
-    for comp_nodes in nx.connected_components(G):
-        outputs = []
-        for n in comp_nodes:
-            d = G.nodes[n]
-            outputs.append(func(d["x"], d["y"]))
-        component_outputs.append(outputs)
-    return component_outputs
+        plt.xlabel(r"$\phi_1$")
+        plt.ylabel(r"$\phi_2$")
+        plt.legend()
 
 
 if __name__ == "__main__":
     import signal
     from tqdm import tqdm
-    import numpy as np
-    import matplotlib.pyplot as plt
+
+    chi_11, chi_22, chi_12 = -5.82460, -5.13075, -2.89596
+    chis = np.array([[chi_11, chi_12], [chi_12, chi_22]])
+    spinodal = Spinodal(chis)
+    spinodal.build()  # Monitor this method call
+    spinodal.plot()
 
     # Define a timeout handler
     def timeout_handler(signum, frame):
@@ -266,7 +308,6 @@ if __name__ == "__main__":
     # Register the timeout handler
     signal.signal(signal.SIGALRM, timeout_handler)
 
-    n = 0
     for i in tqdm(range(1000), desc="Generating spinodal curves"):
         try:
             # Set an alarm for 10 seconds
@@ -287,3 +328,10 @@ if __name__ == "__main__":
             print(
                 f"Iteration {i}: Method call timed out.\n(chi_dr, chi_rs, chi_ds)=({chi_dr}, {chi_rs}, {chi_ds})"
             )
+
+x = np.linspace(0, 4 * np.pi, 21)
+y = np.cos(x)
+roots = np.where(np.diff(np.sign(y)))[0]
+plt.plot(x, y)
+for r in roots:
+    plt.scatter(x[r], y[r], color="red")
