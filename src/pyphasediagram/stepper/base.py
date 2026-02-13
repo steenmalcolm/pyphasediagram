@@ -185,7 +185,9 @@ class BaseStepper(ABC):
                     is_start = False
 
                 if steps % 100 == 0 and steps:
-                    del_phi_arr = np.linalg.norm(np.diff(phi_list[-100:],axis=0), axis=1)
+                    del_phi_arr = np.linalg.norm(
+                        np.diff(phi_list[-100:], axis=0), axis=1
+                    )
                     if del_phi_arr.max() < 1e-9:
                         break
 
@@ -199,6 +201,3 @@ class BaseStepper(ABC):
                 np.array(phi_list).reshape(-1, 2, len(phi_new) // 2), axes=(1, 2, 0)
             )
             self.bins_list.append(phi_arr)
-
-
-# %%

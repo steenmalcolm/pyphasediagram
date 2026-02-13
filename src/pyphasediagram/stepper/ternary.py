@@ -109,7 +109,6 @@ if __name__ == "__main__":
         plt.scatter(b[1, 0, 0], b[1, 1, 0], color=color, s=10, alpha=0.5)
         plt.scatter(b[0, 0, -1], b[0, 1, -1], color=color, s=10, alpha=0.5)
         plt.scatter(b[1, 0, -1], b[1, 1, -1], color=color, s=10, alpha=0.5)
-        if abs()
         plt.xlim(0, 1)
         plt.ylim(0, 1)
         plt.xticks([])
@@ -130,7 +129,3 @@ if __name__ == "__main__":
         if idx > 0:
             plt.axvline(idx, color="r")
         plt.yscale("log")
-
-# %%
-bi
-# %%

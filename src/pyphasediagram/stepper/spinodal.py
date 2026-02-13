@@ -253,46 +253,37 @@ def apply_per_component(
     return component_outputs
 
 
-import signal
-from tqdm import tqdm
-import numpy as np
-import matplotlib.pyplot as plt
+if __name__ == "__main__":
+    import signal
+    from tqdm import tqdm
+    import numpy as np
+    import matplotlib.pyplot as plt
 
+    # Define a timeout handler
+    def timeout_handler(signum, frame):
+        raise TimeoutError("Method call exceeded 10 seconds.")
 
-chi_11, chi_22, chi_12 = -5.59641, -5.67029, -2.88786
-chis = np.array([[chi_11, chi_12], [chi_12, chi_22]])
-spinodal = Spinodal(chis)
-spinodal.build()  # Monitor this method call
-spinodal.plot()
+    # Register the timeout handler
+    signal.signal(signal.SIGALRM, timeout_handler)
 
+    n = 0
+    for i in tqdm(range(1000), desc="Generating spinodal curves"):
+        try:
+            # Set an alarm for 10 seconds
+            signal.alarm(10)
 
-# Define a timeout handler
-def timeout_handler(signum, frame):
-    raise TimeoutError("Method call exceeded 10 seconds.")
+            chi_dr, chi_rs, chi_ds = np.random.random(3) + 2
+            chi_11, chi_22, chi_12 = -2 * chi_ds, -2 * chi_rs, chi_dr - chi_rs - chi_ds
+            chis = np.array([[chi_11, chi_12], [chi_12, chi_22]])
+            spinodal = Spinodal(chis)
+            spinodal.build()  # Monitor this method call
+            spinodal.plot()
+            plt.savefig(f"delete/{i}.png")
+            plt.close()
 
-
-# Register the timeout handler
-signal.signal(signal.SIGALRM, timeout_handler)
-
-n = 0
-for i in tqdm(range(1000), desc="Generating spinodal curves"):
-    try:
-        # Set an alarm for 10 seconds
-        signal.alarm(10)
-
-        chi_dr, chi_rs, chi_ds = np.random.random(3) + 2
-        chi_11, chi_22, chi_12 = -2 * chi_ds, -2 * chi_rs, chi_dr - chi_rs - chi_ds
-        chis = np.array([[chi_11, chi_12], [chi_12, chi_22]])
-        spinodal = Spinodal(chis)
-        spinodal.build()  # Monitor this method call
-        spinodal.plot()
-        plt.savefig(f"delete/{i}.png")
-        plt.close()
-
-        # Cancel the alarm if the method completes in time
-        signal.alarm(0)
-    except TimeoutError:
-        print(
-            f"Iteration {i}: Method call timed out.\n(chi_dr, chi_rs, chi_ds)=({chi_dr}, {chi_rs}, {chi_ds})"
-        )
-chi_11, chi_22, chi_12 = (-4.23542, -505284, -2.44795)
+            # Cancel the alarm if the method completes in time
+            signal.alarm(0)
+        except TimeoutError:
+            print(
+                f"Iteration {i}: Method call timed out.\n(chi_dr, chi_rs, chi_ds)=({chi_dr}, {chi_rs}, {chi_ds})"
+            )
