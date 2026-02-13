@@ -6,6 +6,38 @@ import networkx as nx
 from pyphasediagram.stepper.spinodal import SpinodalPoint, Spinodal
 
 
+def _make_path_subgraph(points):
+    """
+    Helper: points is list of SpinodalPoint in desired path order.
+    Returns a Graph that is a path connecting them in sequence.
+    """
+    G = nx.Graph()
+    for p in points:
+        G.add_node(p)
+    for a, b in zip(points[:-1], points[1:]):
+        G.add_edge(a, b)
+    return G
+
+
+def _make_cycle_subgraph(points):
+    """
+    Helper: points is list of SpinodalPoint in cycle order.
+    Returns a Graph that is a cycle through all points.
+    """
+    G = nx.Graph()
+    for p in points:
+        G.add_node(p)
+    for a, b in zip(points[:-1], points[1:]):
+        G.add_edge(a, b)
+    G.add_edge(points[-1], points[0])
+    return G
+
+
+@pytest.fixture
+def simple_chis():
+    return np.array([[1.0, 0.0], [0.0, 1.0]], dtype=float)
+
+
 # ----------------------------
 # Tests: SpinodalPoint
 # ----------------------------
@@ -295,3 +327,181 @@ def test_build_calls_internal_steps(monkeypatch, simple_chis):
     assert called["connect"] == 1
     assert sp.spinodal_graph.number_of_nodes() > 0
     assert sp.spinodal_graph.number_of_edges() > 0
+
+
+# ----------------------------
+# Tests: Spinodal._coords_from_subgraph
+# ----------------------------
+
+
+def test_coords_from_subgraph_path_order(simple_chis):
+    sp = Spinodal(simple_chis)
+
+    p0 = SpinodalPoint(0, 0.10, 0.20)
+    p1 = SpinodalPoint(1, 0.11, 0.21)
+    p2 = SpinodalPoint(2, 0.12, 0.22)
+    sg = _make_path_subgraph([p0, p1, p2])
+
+    phi1s, phi2s = sp._coords_from_subgraph(sg)
+
+    # For a path, it should start at an endpoint and follow along the path.
+    # Either direction is acceptable because endpoints[0] depends on iteration order.
+    forward_phi1 = np.array([0.10, 0.11, 0.12])
+    backward_phi1 = forward_phi1[::-1]
+
+    assert np.allclose(phi1s, forward_phi1) or np.allclose(phi1s, backward_phi1)
+
+    # And phi2 should match the same traversal
+    forward_phi2 = np.array([0.20, 0.21, 0.22])
+    backward_phi2 = forward_phi2[::-1]
+    assert np.allclose(phi2s, forward_phi2) or np.allclose(phi2s, backward_phi2)
+
+
+def test_coords_from_subgraph_cycle_contains_all_nodes(simple_chis):
+    sp = Spinodal(simple_chis)
+
+    p0 = SpinodalPoint(0, 0.10, 0.20)
+    p1 = SpinodalPoint(1, 0.11, 0.21)
+    p2 = SpinodalPoint(2, 0.12, 0.22)
+    p3 = SpinodalPoint(3, 0.13, 0.23)
+    sg = _make_cycle_subgraph([p0, p1, p2, p3])
+
+    phi1s, phi2s = sp._coords_from_subgraph(sg)
+
+    # DFS on a cycle should visit every node exactly once
+    assert len(phi1s) == 4
+    assert len(phi2s) == 4
+
+    # Order is not guaranteed, but the set of coordinates should match
+    assert set(np.round(phi1s, 12)) == {0.10, 0.11, 0.12, 0.13}
+    assert set(np.round(phi2s, 12)) == {0.20, 0.21, 0.22, 0.23}
+
+
+# ----------------------------
+# Tests: Spinodal._third_derivative
+# ----------------------------
+
+
+def test_third_derivative_scalar_matches_manual(simple_chis):
+    sp = Spinodal(simple_chis)
+    # choose values away from 0 / boundaries to avoid singularities
+    phi1, phi2 = 0.2, 0.3
+
+    phi0 = 1 - phi1 - phi2
+    H_11 = 1 / phi1 + 1 / phi0 + simple_chis[0, 0]
+    H_12 = 1 / phi0 + simple_chis[0, 1]
+    expected = H_12**3 / (phi1**2) - H_11**3 / (phi2**2) + (H_11 - H_12) ** 3 / phi0**2
+
+    got = sp._third_derivative(phi1, phi2)
+    assert got == pytest.approx(expected)
+
+
+def test_third_derivative_vectorized_shapes(simple_chis):
+    sp = Spinodal(simple_chis)
+    phi1 = np.array([0.2, 0.21, 0.22])
+    phi2 = np.array([0.3, 0.29, 0.28])
+
+    out = sp._third_derivative(phi1, phi2)
+    assert isinstance(out, np.ndarray)
+    assert out.shape == phi1.shape
+
+
+# ----------------------------
+# Tests: Spinodal._find_critical_points
+# ----------------------------
+
+
+def test_find_critical_points_appends_point(monkeypatch, simple_chis):
+    sp = Spinodal(simple_chis)
+    sp.spinodal_graph = nx.Graph()
+    sp.critical_points = []
+
+    # Create a trivial component with 2 nodes (ordering doesn't matter here)
+    p0 = SpinodalPoint(0, 0.10, 0.20)
+    p1 = SpinodalPoint(1, 0.20, 0.10)
+    sp.spinodal_graph.add_edge(p0, p1)
+
+    # Force _coords_from_subgraph to return known arrays of length 2
+    # and force a third-derivative sign change across the two samples.
+    monkeypatch.setattr(
+        sp,
+        "_coords_from_subgraph",
+        lambda sg: (np.array([0.1, 0.2]), np.array([0.2, 0.1])),
+    )
+
+    # Third derivative: [-1, +1] => sign change => one root at index 0.
+    def fake_third_derivative(phi1, phi2):
+        # Called once with arrays, later with scalar interpolated values
+        if np.ndim(phi1) > 0:
+            return np.array([-1.0, +1.0])
+        return 0.0  # td_c at interpolated critical point
+
+    monkeypatch.setattr(sp, "_third_derivative", fake_third_derivative)
+
+    sp._find_critical_points()
+
+    assert len(sp.critical_points) == 1
+    cp = sp.critical_points[0]
+    assert isinstance(cp, SpinodalPoint)
+    assert cp.idx == -1
+    # Interp between (phi1,phi2) = (0.1,0.2) and (0.2,0.1) at td=0 -> midpoint
+    assert cp.phi1 == pytest.approx(0.15)
+    assert cp.phi2 == pytest.approx(0.15)
+
+
+def test_find_critical_points_handles_decreasing_xp_order(monkeypatch, simple_chis):
+    """
+    This specifically tests the code path that sorts xp before np.interp.
+    If xp is [ +1, -1 ] (decreasing), interp would fail without sorting.
+    """
+    sp = Spinodal(simple_chis)
+    sp.spinodal_graph = nx.Graph()
+    sp.critical_points = []
+
+    p0 = SpinodalPoint(0, 0.0, 0.0)
+    p1 = SpinodalPoint(1, 0.0, 0.0)
+    sp.spinodal_graph.add_edge(p0, p1)
+
+    monkeypatch.setattr(
+        sp,
+        "_coords_from_subgraph",
+        lambda sg: (np.array([0.0, 1.0]), np.array([1.0, 0.0])),
+    )
+
+    def fake_third_derivative(phi1, phi2):
+        if np.ndim(phi1) > 0:
+            return np.array([+1.0, -1.0])  # decreasing xp, but still crosses zero
+        return 0.0
+
+    monkeypatch.setattr(sp, "_third_derivative", fake_third_derivative)
+
+    sp._find_critical_points()
+
+    assert len(sp.critical_points) == 1
+    cp = sp.critical_points[0]
+    assert cp.phi1 == pytest.approx(0.5)
+    assert cp.phi2 == pytest.approx(0.5)
+
+
+def test_find_critical_points_raises_on_nan_third_derivative(monkeypatch, simple_chis):
+    sp = Spinodal(simple_chis)
+    sp.spinodal_graph = nx.Graph()
+    sp.critical_points = []
+
+    p0 = SpinodalPoint(0, 0.10, 0.20)
+    p1 = SpinodalPoint(1, 0.20, 0.10)
+    sp.spinodal_graph.add_edge(p0, p1)
+
+    monkeypatch.setattr(
+        sp,
+        "_coords_from_subgraph",
+        lambda sg: (np.array([0.1, 0.2]), np.array([0.2, 0.1])),
+    )
+    monkeypatch.setattr(
+        sp,
+        "_third_derivative",
+        lambda phi1, phi2: np.array([np.nan, 1.0]) if np.ndim(phi1) > 0 else 0.0,
+    )
+
+    with pytest.raises(ValueError, match="NaN values found in third derivative"):
+        sp._find_critical_points()
