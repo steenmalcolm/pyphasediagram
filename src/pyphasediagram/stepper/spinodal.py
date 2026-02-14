@@ -90,14 +90,12 @@ class Spinodal:
 
         return -p / 2 + np.sqrt(discriminant), -p / 2 - np.sqrt(discriminant)
 
-    def _domain_data(self, phi1_i, phi1_f):
+    def _domain_data(self, phi1_i, phi1_f, num_points=5000):
         """
         Compute the spinodal branches for phi1 in [phi1_i, phi1_f]
         and add them to the graph as nodes with attributes phi1, phi2, and pos=(phi1, phi2).
         """
-        num_points = 5000
-        dphi1 = (phi1_f - phi1_i) / num_points
-        phi1_vals = np.linspace(phi1_i, phi1_f, num_points)
+        phi1_vals = np.linspace(phi1_i, phi1_f)
         phi2_branches = self.phi2_from_phi1(phi1_vals)
 
         # Iterate over both branches
@@ -161,7 +159,7 @@ class Spinodal:
         if self.spinodal_graph.number_of_nodes() == 0:
             return
         comps = list(nx.connected_components(self.spinodal_graph))
-        for i, compi in enumerate(comps):
+        for compi in comps:
             sub_graphi = self.spinodal_graph.subgraph(compi)
             endpoints_i = [
                 pt for pt in sub_graphi.nodes() if sub_graphi.degree[pt] == 1
@@ -169,13 +167,13 @@ class Spinodal:
             closest_pt_list = [0] * len(endpoints_i)
             closest_dist_list = [float("inf")] * len(endpoints_i)
 
-            for j, compj in enumerate(comps):
+            for compj in comps:
                 sub_graphj = self.spinodal_graph.subgraph(compj)
                 endpoints_j = [
                     pt for pt in sub_graphj.nodes() if sub_graphj.degree[pt] == 1
                 ]
                 for epi_idx, epi in enumerate(endpoints_i):
-                    for epj_idx, epj in enumerate(endpoints_j):
+                    for epj in endpoints_j:
                         dist = epi.dist(epj)
                         if dist < closest_dist_list[epi_idx] and epi != epj:
                             # Check edge case epi and epj are only two points on spinodal branch
