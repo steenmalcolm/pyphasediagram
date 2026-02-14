@@ -92,15 +92,15 @@ if __name__ == "__main__":
     )
     obj = TernaryStepper(chi_matrix)
     n = time.perf_counter()
-    obj.run(delta0=1e-3)
+    phi_init = obj.phi_init()
+    v_t_init = np.array([-1, -1, -1, -1], dtype=float)
+    obj.run(phi_init, v_t_init)
     print(f"took {time.perf_counter() - n:.2f} seconds")
 
-    # %%
     print(len(obj.bins_list))
     plt.figure(figsize=(10, 10))
     colormap = plt.cm.viridis
     for i, b in enumerate(obj.bins_list):
-
         print(b.shape)
         plt.plot(b[0, 0], b[0, 1], "r")
         plt.plot(b[1, 0], b[1, 1], "b")
@@ -113,19 +113,4 @@ if __name__ == "__main__":
         plt.ylim(0, 1)
         plt.xticks([])
         plt.yticks([])
-    # %%
-    for i, b in enumerate(obj.bins_list):
-        bt = b.reshape(4, -1).T
-        s_list = []
-        idx = 0
-        for j, bi in enumerate(bt):
-            # SVD of Jacobian
-            Vt, S, Vt = np.linalg.svd(obj._jac_fn(bi), full_matrices=False)
-            if abs(bi[:2].mean() - 0.388888) < 1e-3:
-                idx = j
-            s_list.append(S.min())
-        plt.subplot(3, 1, i + 1)
-        plt.plot(s_list)
-        if idx > 0:
-            plt.axvline(idx, color="r")
-        plt.yscale("log")
+    plt.show()

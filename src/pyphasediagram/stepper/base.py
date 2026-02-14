@@ -19,7 +19,7 @@ class BaseStepper(ABC):
     co_arr = np.empty((0, 4))
     bins_list = []
 
-    max_steps = 1e6
+    MAX_STEPS = 1e5
 
     def __init__(self):
         self._residual_jit = jax.jit(self.residual)
@@ -68,136 +68,115 @@ class BaseStepper(ABC):
         J_pinv = (Vt.T * S_inv) @ U.T
         return -J_pinv @ E, E, abs(S[-1])
 
-    def run(self, phi0=None, dir0=None, delta0=1e-3):
+    def run(
+        self,
+        phi_init: np.ndarray,
+        v_init: np.ndarray,
+        delta_0=1e-5,
+        delta_1=1e-3,
+    ):
         """Executes the stepping procedure and returns the coexistance curve"""
 
-        # Step in both directions
+        phi_new = phi_init.copy()
 
-        for branch_dir in [1, -1]:
+        res_new = self._residual_jit(phi_new)
+        phi_list = [phi_new.copy()]
 
-            # Need special care when starting from a branch split
-            is_start = True
-            if phi0 is not None:
-                dir0 *= branch_dir
-                phi_new = phi0.copy()
+        delta = delta_1
 
-            # Start at boundary
-            else:
-                # Don't go in both directions if starting at boundary
-                if branch_dir == -1:
-                    break
-                phi_new = self.phi_init()
+        # Track second smallest singular value to detect branching points
+        sv = self.projection(phi_new)[2]
+        sv_list = [sv]
+        steps = 0
+        is_trace_start = True
+        while not self.is_terminate(np.array(phi_new)):
+            is_trace_start = len(phi_list) < 2
 
-            # Branch dir can change after branching whereas dir0 is fixed at start
-            dir_branch = dir0
+            if steps > self.MAX_STEPS:
+                print("Reached maximum number of steps.")
+                break
+
+            # Decrease step size near branching point
+            delta = max(min(sv, delta_1), delta_0)
+
+            # tangent step
+            v_t = self.tangent_vec(phi_new)  # (N,)
+
+            # keep sign of direction consistent with previous step
+            v_prev = v_init if is_trace_start else phi_list[-1] - phi_list[-2]
+            v_t *= np.sign(np.dot(v_t, v_prev))
+
+            phi_new = phi_new + delta * v_t
             res_new = self._residual_jit(phi_new)
-            phi_list = [phi_new.copy()]
 
-            delta = delta0
-            s_min = self.projection(phi_new)[2]
-
-            s_list = [s_min]
-            steps = 0
-            while not self.is_terminate(np.array(phi_new)) and (
-                phi0 is None or np.linalg.norm(phi_new - phi0) > 1e-3 or is_start
-            ):
-
-                if steps > self.max_steps:
-                    print("Reached maximum number of steps.")
-                    break
-
-                # check for crossover of binodal branches
-                if (
-                    s_min < 1e-1
-                    and np.linalg.norm(phi_new[:2] - phi_new[len(phi_new) // 2 :])
-                    > 5e-2
-                    and not is_start
-                ):
-                    # Decrease step size near branching point
-                    delta = max(min(s_min, delta0), delta0**2 * 1e-2)
-                    # Branching detected
-
-                    if s_min < 1e-4:
-
-                        if len(self.co_arr) == 0 or (
-                            # new branching point sufficiently different from previous ones
-                            np.linalg.norm(
-                                # system invariant under phase swap
-                                np.r_[
-                                    self.co_arr,
-                                    np.roll(self.co_arr, len(phi_new) // 2, axis=1),
-                                ]
-                                - phi_new,
-                                axis=1,
-                            ).min()
-                            > 1e-2
-                        ):
-
-                            self.co_arr = np.r_[self.co_arr, phi_new[None, :]]
-                            U, S, Vt = np.linalg.svd(
-                                self._jac_fn(phi_new), full_matrices=False
-                            )
-                            self.run(phi0=phi_new, dir0=Vt[-1], delta0=delta0)
-                            is_start = True
-                            dir_branch = v_t
-                else:
-                    delta = delta0
-
-                # tangent step
-                v_t = self.tangent_vec(phi_new)  # (N,)
-
-                # keep direction consistent
-                if is_start:
-                    direction = (
-                        dir_branch if dir_branch is not None else -np.ones_like(v_t)
+            # project back to manifold
+            proj_counter = 0
+            # TODO: move this clause to _project method and add a max_iter argument
+            while np.linalg.norm(res_new) > 1e-8:
+                v_n, res_new, sv = self.projection(phi_new)
+                phi_new = phi_new + v_n
+                if proj_counter > 100:
+                    raise RuntimeError(
+                        f"Projection did not converge after {proj_counter} iterations"
                     )
-                else:
-                    direction = phi_list[-1] - phi_list[-2]
+                #                 proj_counter += 1
 
-                direction /= np.linalg.norm(direction)
+            if np.isnan(phi_new).any():
+                raise RuntimeError(f"Binodal NaN encountered after {steps} steps")
 
-                a = np.dot(v_t, direction)
+            # TODO: Once BinodalPoint instances replace phi_list, create `is_colinear` method to check if the direction of new point is colinear with previous direction.
+            if not is_trace_start:
+                # If the direction of new point deviates too much from previous direction the system likely wants to branch
+                v_current = phi_new - phi_list[-1]
 
-                # If the new direction deviates too much from previous the system likely wants to branch
-                if a**2 < 0.9:
-                    v_t = direction
-                else:
-                    v_t *= np.sign(a)
-
-                phi_new = phi_new + delta * v_t
-                res_new = self._residual_jit(phi_new)
-
-                # project back to manifold
-                proj_counter = 0
-                while np.linalg.norm(res_new) > 1e-8:
-                    v_n, res_new, s_min = self.projection(phi_new)
-                    phi_new = phi_new + v_n
-                    if proj_counter > 100:
-                        raise RuntimeError(
-                            f"Projection did not converge after {proj_counter} iterations"
-                        )
-                    proj_counter += 1
-
-                if np.isnan(phi_new).any():
-                    raise RuntimeError(f"Binodal NaN encountered after {steps} steps")
-
-                if s_min > 1e-3:
-                    is_start = False
-
-                if steps % 100 == 0 and steps:
-                    del_phi_arr = np.linalg.norm(
-                        np.diff(phi_list[-100:], axis=0), axis=1
+                angle = (
+                    np.dot(v_t, v_prev) / np.linalg.norm(v_t) / np.linalg.norm(v_prev)
+                )
+                if angle**2 < 0.9:
+                    raise RuntimeError(
+                        f"Large deviation between tangent direction and previous step, a={abs(angle):.2f}. Might be cause by branching with singular value = {sv:.2e}"
                     )
-                    if del_phi_arr.max() < 1e-9:
-                        break
 
-                phi_list.append(phi_new.copy())
-                s_list.append(s_min)
-                Vt, S, Vt = np.linalg.svd(self._jac_fn(phi_new), full_matrices=False)
+            phi_list.append(phi_new.copy())
+            sv_list.append(sv)
 
-                steps += 1
+            steps += 1
 
-            phi_arr = np.transpose(
-                np.array(phi_list).reshape(-1, 2, len(phi_new) // 2), axes=(1, 2, 0)
-            )
-            self.bins_list.append(phi_arr)
+        phi_arr = np.transpose(
+            np.array(phi_list).reshape(-1, 2, len(phi_new) // 2), axes=(1, 2, 0)
+        )
+        self.bins_list.append(phi_arr)
+
+
+if __name__ == "__main__":
+
+    import matplotlib.pyplot as plt
+
+    phi_arr = np.transpose(
+        np.array(phi_list).reshape(-1, 2, len(phi_new) // 2), axes=(1, 2, 0)
+    )
+    plt.scatter(phi_arr[0, 0], phi_arr[0, 1])
+    plt.scatter(phi_arr[1, 0], phi_arr[1, 1])
+    plt.plot([0, 1], [1, 0], "k--")
+    plt.xlim(0, 1)
+    plt.ylim(0, 1)
+
+    import matplotlib.pyplot as plt
+
+    plt.scatter(phi_init[::2], phi_init[1::2], color="red")
+    plt.scatter(phi_new[::2], phi_new[1::2], color="blue")
+    plt.plot([0, 1], [1, 0], "k--")
+    plt.xlim(0, 1)
+    plt.ylim(0, 1)
+
+    import matplotlib.pyplot as plt
+
+    colors = ["red", "blue"]
+    for i, d in enumerate([v_t, v_init]):
+        d /= np.linalg.norm(d)
+        plt.plot([0, d[0]], [0, d[1]], color=colors[i], label=f"{i}")
+        plt.plot([0, d[2]], [0, d[3]], color=colors[i])
+
+    sv = np.array(sv_list)
+    plt.plot(sv)
+    plt.yscale("log")
