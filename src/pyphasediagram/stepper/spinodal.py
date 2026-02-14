@@ -326,10 +326,3 @@ if __name__ == "__main__":
             print(
                 f"Iteration {i}: Method call timed out.\n(chi_dr, chi_rs, chi_ds)=({chi_dr}, {chi_rs}, {chi_ds})"
             )
-
-x = np.linspace(0, 4 * np.pi, 21)
-y = np.cos(x)
-roots = np.where(np.diff(np.sign(y)))[0]
-plt.plot(x, y)
-for r in roots:
-    plt.scatter(x[r], y[r], color="red")
