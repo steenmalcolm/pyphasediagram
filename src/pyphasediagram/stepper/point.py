@@ -52,6 +52,10 @@ class Point:
         cos_angle = np.dot(self_to_1, self_to_2)
         return cos_angle < np.cos(np.pi - tol)
 
+    def __iter__(self):
+        yield self.phi1
+        yield self.phi2
+
 
 class SpinodalPoint(Point):
     def __repr__(self):
@@ -95,12 +99,22 @@ class CriticalPoint(Point):
 
 
 class BinodalPoint:
-    def __init__(self, phi1a: float, phi2a: float, phi1b: float, phi2b: float):
+    def __init__(
+        self, phi1a: float, phi2a: float, phi1b: float, phi2b: float, sv: float
+    ):
         self.pta = Point(0, phi1a, phi2a)
         self.ptb = Point(1, phi1b, phi2b)
+        self.sv = sv
 
     def __repr__(self):
-        return f"BinodalPoint(phi_a=({self.pta.phi1:.4f}, {self.pta.phi2:.4f}), phi_b=({self.ptb.phi1:.4f}, {self.ptb.phi2:.4f}))"
+        return f"BinodalPoint(phi_a=({self.pta.phi1:.4f}, {self.pta.phi2:.4f}), phi_b=({self.ptb.phi1:.4f}, {self.ptb.phi2:.4f}, sv={self.sv:.2e}))"
+
+    def __iter__(self):
+        yield from self.pta
+        yield from self.ptb
+
+    def to_numpy(self):
+        return np.array([self.pta.phi1, self.pta.phi2, self.ptb.phi1, self.ptb.phi2])
 
 
 if __name__ == "__main__":
