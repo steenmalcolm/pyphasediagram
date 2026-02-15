@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 
 class SpinodalPoint:
     def __init__(self, idx: int, phi1: float, phi2: float):
+        """A point on the spinodal curve with coordinates (phi1, phi2) and an index for graph node identification."""
         self.idx = int(idx)
         self.phi1 = float(phi1)
         self.phi2 = float(phi2)
@@ -35,6 +36,7 @@ class SpinodalPoint:
         return np.array([self.phi1 - pt.phi1, self.phi2 - pt.phi2])
 
     def plot(self, s=10, **kwargs):
+        """Convenience method to plot this point."""
         plt.scatter(self.phi1, self.phi2, s=s, **kwargs)
 
     def is_between(self, pt1, pt2, tol=np.pi / 8):
@@ -51,9 +53,46 @@ class SpinodalPoint:
         return cos_angle < np.cos(np.pi - tol)
 
 
+class CriticalPoint(SpinodalPoint):
+    def __init__(self, idx: int, phi1: float, phi2: float, dphi1: float, dphi2: float):
+        """A critical point on the spinodal curve with coordinates (phi1, phi2) and a normalized direction vector (dphi1, dphi2) indicating the direction of the spinodal curve at this point. The direction vector is normalized to have unit length."""
+        super().__init__(idx, phi1, phi2)
+        dphi_norm = np.sqrt(dphi1**2 + dphi2**2)
+        self.dphi1 = float(dphi1) / dphi_norm
+        self.dphi2 = float(dphi2) / dphi_norm
+
+    @classmethod
+    def from_points(cls, idx: int, pt1: SpinodalPoint, pt2: SpinodalPoint):
+        """Create a CriticalPoint from two SpinodalPoints by taking the midpoint of their coordinates as the critical point's coordinates and the vector from pt2 to pt1 as the direction vector. The direction vector is normalized to have unit length."""
+        phi1 = (pt1.phi1 + pt2.phi1) / 2
+        phi2 = (pt1.phi2 + pt2.phi2) / 2
+
+        dphi1 = pt1.phi1 - pt2.phi1
+        dphi2 = pt1.phi2 - pt2.phi2
+        dphi_norm = np.sqrt(dphi1**2 + dphi2**2)
+        dphi1 = float(dphi1) / dphi_norm
+        dphi2 = float(dphi2) / dphi_norm
+
+        return cls(idx, phi1, phi2, dphi1, dphi2)
+
+    def plot(self, s=10, **kwargs):
+        """Convenience method to plot this critical point with a different marker and color than regular SpinodalPoints. By default, the marker is a yellow star."""
+        if "marker" not in kwargs:
+            kwargs["marker"] = "*"
+        if "color" not in kwargs:
+            kwargs["color"] = "yellow"
+        if "edgecolor" not in kwargs:
+            kwargs["edgecolor"] = "black"
+        super().plot(s=s, **kwargs)
+
+    def __repr__(self):
+        return f"CriticalPoint(phi1={self.phi1:.3f}, phi2={self.phi2:.3f}, dphi1={self.dphi1:.3f}, dphi2={self.dphi2:.3f})"
+
+
 class Spinodal:
 
     def __init__(self, chis: np.ndarray):
+        """Initialize the Spinodal class with a 2x2 matrix of chi parameters. The spinodal curve will be computed based on these parameters. The graph structure to store the spinodal curve is initialized as an empty NetworkX graph, and a list to store critical points is also initialized."""
         self.chis = chis
         self.spinodal_graph = nx.Graph()
         self.node_id = 0
@@ -121,9 +160,13 @@ class Spinodal:
         p, q = self._get_p_q(phi1_vals)
         discriminant = p**2 + 4 * q
 
+        # Edge case where pole of p and q is resolved
+        for pole_idx in np.where(np.isinf(p) | np.isinf(q))[0]:
+            discriminant[pole_idx] = discriminant[pole_idx - 1]
+
         roots_idx = np.where(np.diff(np.sign(discriminant)))[0]
 
-        # Handle edge cases where the discriminant is positive at the endpoints
+        # Check if discriminant is positive at the endpoints and add them to the roots if so, since the spinodal branches can start/end at the domain boundaries
         if discriminant[0] > 0:
             roots_idx = np.r_[0, roots_idx]
         if discriminant[-1] > 0:
@@ -229,18 +272,27 @@ class Spinodal:
                 raise ValueError(
                     "NaN values found in third derivative, check for invalid phi1/phi2 values."
                 )
-            # d = 1000000
-            # third_deriv[third_deriv > d] = d
-            # third_deriv[third_deriv < -d] = -d
+            # Edge case where third derivative has extrema at root
+            extrema_idxs = np.where(np.diff(np.sign(np.diff(third_deriv))))[0] + 1
+            for extrema_idx in extrema_idxs:
+                if abs(third_deriv[extrema_idx]) < 1e-4:
+                    phi1_c, phi2_c = phi1[extrema_idx], phi2[extrema_idx]
+                    dphi1 = phi1[extrema_idx + 1] - phi1[extrema_idx - 1]
+                    dphi2 = phi2[extrema_idx + 1] - phi2[extrema_idx - 1]
+                    self.critical_points.append(
+                        CriticalPoint(-1, phi1_c, phi2_c, dphi1, dphi2)
+                    )
 
             # Find roots of third derivative
-            roots = np.where(np.diff(np.sign(third_deriv)))[0]
+            root_idxs = np.where(np.diff(np.sign(third_deriv)))[0]
 
-            for root in roots:
-                # For np.interp to work, we need to ensure the third_deriv values at root and root+1 are in increasing order. If not, swap them.
-                xp = third_deriv[root : root + 2]
-                phi1p, phi2p = phi1[root : root + 2], phi2[root : root + 2]
-                order = np.argsort(third_deriv[root : root + 2])
+            for r_idx in root_idxs:
+                dphi1 = phi1[r_idx + 1] - phi1[r_idx - 1]
+                dphi2 = phi2[r_idx + 1] - phi2[r_idx - 1]
+                # For np.interp to work, we need to ensure the third_deriv values at r_idx and r_idx+1 are in increasing order. If not, swap them.
+                xp = third_deriv[r_idx : r_idx + 2]
+                phi1p, phi2p = phi1[r_idx : r_idx + 2], phi2[r_idx : r_idx + 2]
+                order = np.argsort(third_deriv[r_idx : r_idx + 2])
                 phi1_c = np.interp(0, xp[order], phi1p[order])
                 phi2_c = np.interp(0, xp[order], phi2p[order])
                 td_c = self._third_derivative(phi1_c, phi2_c)
@@ -251,8 +303,9 @@ class Spinodal:
                 assert abs(td_c) < np.std(
                     xp
                 ), f"Third derivative at critical point ({phi1_c:.2f}, {phi2_c:.2f}) is not close to zero: {td_c:.5f}\n(chi_11, chi_22, chi_12)=({self.chis[0, 0]}, {self.chis[1, 1]}, {self.chis[0, 1]})\nTry increasing resolution of spinodal curve."
-
-                self.critical_points.append(SpinodalPoint(-1, phi1_c, phi2_c))
+                self.critical_points.append(
+                    CriticalPoint(-1, phi1_c, phi2_c, dphi1, dphi2)
+                )
 
     def plot(self):
         a, b, c = self.chis[0, 0], self.chis[1, 1], self.chis[0, 1]
@@ -275,9 +328,9 @@ class Spinodal:
             # plt.scatter(phi1s[-1], phi2s[-1], alpha=0.45)
         for i, crit_pt in enumerate(self.critical_points):
             if i == 0:
-                crit_pt.plot(s=50, color="red", label="Critical point")
+                crit_pt.plot(s=50, label="Critical point(s)", zorder=5)
             else:
-                crit_pt.plot(s=50, color="red")
+                crit_pt.plot(s=50, zorder=5)
         plt.xlim(0, 1)
         plt.ylim(0, 1)
         plt.plot([0, 1], [1, 0], "k--")
@@ -291,7 +344,7 @@ if __name__ == "__main__":
     import signal
     from tqdm import tqdm
 
-    chi_dr, chi_rs, chi_ds = 2.9, 1.5, 1.5
+    chi_dr, chi_rs, chi_ds = 3.1, 3.1, 3.1
     chi_11, chi_22, chi_12 = -2 * chi_ds, -2 * chi_rs, chi_dr - chi_rs - chi_ds
     chis = np.array([[chi_11, chi_12], [chi_12, chi_22]])
     spinodal = Spinodal(chis)
