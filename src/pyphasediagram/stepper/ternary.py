@@ -32,7 +32,7 @@ class TernaryStepper(BaseStepper):
     def is_terminate(self, phi: np.ndarray) -> bool:
         """Stop when phases become too similar or invalid composition."""
 
-        close = np.linalg.norm(phi[2:] - phi[:2]) < 1e-5
+        close = np.linalg.norm(phi[2:] - phi[:2]) < 1e-2
         invalid = (phi < 0).any() or (phi[0] + phi[1]) > 1 or (phi[2] + phi[3]) > 1
         return close or invalid
 
@@ -58,10 +58,13 @@ class TernaryStepper(BaseStepper):
         #     ]
 
         # nearly-binary start
+        phi_init: np.ndarray = None
+        v_init: np.ndarray = None
         if which_comp == 0:
             chi = self.chis[0, 1] - 0.5 * (self.chis[0, 0] + self.chis[1, 1])
             phi_bin = self.binary_state(chi)
             phi_init = np.array([phi_bin, 1 - phi_bin, 1 - phi_bin, phi_bin]) - 1e-4
+            v_init = np.array([-1, -1, -1, -1])
 
         elif which_comp == 1:
             chi = -0.5 * self.chis[1, 1]
@@ -69,6 +72,7 @@ class TernaryStepper(BaseStepper):
             phi_init = np.array([phi_bin, 1 - phi_bin, 1 - phi_bin, phi_bin]) - 1e-4
             phi_init[0] = 1 - phi_init[0] - phi_init[1]
             phi_init[2] = 1 - phi_init[2] - phi_init[3]
+            v_init = np.array([1, 0, 1, 0])
 
         elif which_comp == 2:
             chi = -0.5 * self.chis[0, 0]
@@ -76,6 +80,7 @@ class TernaryStepper(BaseStepper):
             phi_init = np.array([phi_bin, 1 - phi_bin, 1 - phi_bin, phi_bin]) - 1e-4
             phi_init[1] = 1 - phi_init[0] - phi_init[1]
             phi_init[3] = 1 - phi_init[2] - phi_init[3]
+            v_init = np.array([0, 1, 0, 1])
 
         res = self._residual_jit(phi_init)
         max_iter = 1000
@@ -95,7 +100,7 @@ class TernaryStepper(BaseStepper):
                 raise RuntimeError("In binary_init: Projection not converging")
             iteration += 1
 
-        return phi_init
+        return phi_init, v_init
 
 
 if __name__ == "__main__":
@@ -103,41 +108,19 @@ if __name__ == "__main__":
     import time
 
     chi = 2.7
-    for _ in range(10):
-        chi_12, chi_13, chi_23 = np.random.random(3) + 2
-        chi_matrix = np.array(
-            [
-                [-2 * chi_13, chi_12 - chi_13 - chi_23],
-                [chi_12 - chi_13 - chi_23, -2 * chi_23],
-            ]
-        )
-        obj = TernaryStepper(chi_matrix)
-        n = time.perf_counter()
-        phi_init = obj.binary_init(0)
-        assert phi_init[:2].sum() < 1 and phi_init[2:].sum() < 1
-        plt.scatter(
-            phi_init[::2], phi_init[1::2], color="r", s=5, label="solvent dilute limit"
-        )
-        phi_init = obj.binary_init(1)
-        assert (phi_init[::2] > 0).all()
-        plt.scatter(
-            phi_init[::2], phi_init[1::2], color="b", s=5, label="droplet dilute limit"
-        )
-        phi_init = obj.binary_init(2)
-        assert (phi_init[1::2] > 0).all()
-        plt.scatter(
-            phi_init[::2],
-            phi_init[1::2],
-            color="g",
-            s=5,
-            label="regulator dilute limit",
-        )
-    plt.xlim(0, 1)
-    plt.ylim(0, 1)
-    plt.plot([0, 1], [1, 0], "k--")
-    plt.show()
-    print("end")
-
+    chi_12, chi_13, chi_23 = np.random.random(3) + 2
+    chi_matrix = np.array(
+        [
+            [-2 * chi_13, chi_12 - chi_13 - chi_23],
+            [chi_12 - chi_13 - chi_23, -2 * chi_23],
+        ]
+    )
+    chi_matrix = np.array([[-4.84224323, -2.84572992], [-2.84572992, -5.44663668]])
+    obj = TernaryStepper(chi_matrix)
+    n = time.perf_counter()
+    for which_comp in range(3):
+        phi_init, v_init = obj.binary_init(which_comp)
+        phi_arr, sv_list = obj.run(phi_init, v_init)
     # v_t_init = np.array([-1, -1, -1, -1], dtype=float)
     # obj.run(phi_init, v_t_init)
     # print(f"took {time.perf_counter() - n:.2f} seconds")
