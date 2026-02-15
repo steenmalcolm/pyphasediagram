@@ -130,8 +130,6 @@ class Spinodal:
             roots_idx = np.r_[roots_idx, -1]
         # Add 1 at beginning of domain so the discriminant is positive
         roots_idx[::2] += 1
-        # TODO: Probably don't need to subtract here.
-        roots_idx[1::2] -= 1
         return phi1_vals[roots_idx]
 
     def _clip_to_domain(self):
