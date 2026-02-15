@@ -51,7 +51,7 @@ class BaseStepper(ABC):
 
         return ns.ravel()
 
-    def projection(self, phi: jnp.ndarray) -> tuple[np.ndarray, np.ndarray, float]:
+    def _projection(self, phi: jnp.ndarray) -> tuple[np.ndarray, np.ndarray, float]:
         """Projects composition back onto the coexistence manifold."""
 
         E = self._residual_jit(phi)
@@ -66,7 +66,22 @@ class BaseStepper(ABC):
         S_inv = 1 / S
         S_inv[S / S.max() < tol] = 0
         J_pinv = (Vt.T * S_inv) @ U.T
-        return -J_pinv @ E, E, abs(S[-1])
+        return -J_pinv @ E, E, abs(S).min()
+
+    def _project(self, phi: jnp.ndarray, res: jnp.ndarray) -> jnp.ndarray:
+        """Iteratively project phi back to the manifold until residual is small enough. Returns the next smallest singular value"""
+
+        sv: float = None
+        n_projections = 0
+        while np.linalg.norm(res) > 1e-8:
+            v_n, res, sv = self._projection(phi)
+            phi += v_n
+            if n_projections > 100:
+                raise RuntimeError(
+                    f"Projection did not converge after {n_projections} iterations"
+                )
+            n_projections += 1
+        return sv
 
     def run(
         self,
@@ -85,7 +100,7 @@ class BaseStepper(ABC):
         delta = delta_1
 
         # Track second smallest singular value to detect branching points
-        sv = self.projection(phi_new)[2]
+        sv = self._projection(phi_new)[2]
         sv_list = [sv]
         steps = 0
         is_trace_start = True
@@ -109,17 +124,7 @@ class BaseStepper(ABC):
             phi_new = phi_new + delta * v_t
             res_new = self._residual_jit(phi_new)
 
-            # project back to manifold
-            proj_counter = 0
-            # TODO: move this clause to _project method and add a max_iter argument
-            while np.linalg.norm(res_new) > 1e-8:
-                v_n, res_new, sv = self.projection(phi_new)
-                phi_new = phi_new + v_n
-                if proj_counter > 100:
-                    raise RuntimeError(
-                        f"Projection did not converge after {proj_counter} iterations"
-                    )
-                #                 proj_counter += 1
+            sv = self._project(phi_new, res_new)
 
             if np.isnan(phi_new).any():
                 raise RuntimeError(f"Binodal NaN encountered after {steps} steps")
@@ -146,6 +151,7 @@ class BaseStepper(ABC):
             np.array(phi_list).reshape(-1, 2, len(phi_new) // 2), axes=(1, 2, 0)
         )
         self.bins_list.append(phi_arr)
+        return phi_arr, sv_list
 
 
 if __name__ == "__main__":
@@ -155,8 +161,11 @@ if __name__ == "__main__":
     phi_arr = np.transpose(
         np.array(phi_list).reshape(-1, 2, len(phi_new) // 2), axes=(1, 2, 0)
     )
-    plt.scatter(phi_arr[0, 0], phi_arr[0, 1])
-    plt.scatter(phi_arr[1, 0], phi_arr[1, 1])
+    plt.plot(phi_arr[0, 0], phi_arr[0, 1])
+    plt.plot(phi_arr[1, 0], phi_arr[1, 1])
+    n = [11111]
+    plt.scatter(phi_arr[0, 0, n], phi_arr[0, 1, n], color="red")
+    plt.scatter(phi_arr[1, 0, n], phi_arr[1, 1, n], color="red")
     plt.plot([0, 1], [1, 0], "k--")
     plt.xlim(0, 1)
     plt.ylim(0, 1)

@@ -1,4 +1,3 @@
-# %%
 import time
 
 import jax.numpy as jnp
@@ -32,7 +31,7 @@ class TernaryStepper(BaseStepper):
     def is_terminate(self, phi: np.ndarray) -> bool:
         """Stop when phases become too similar or invalid composition."""
 
-        close = np.linalg.norm(phi[2:] - phi[:2]) < 1e-3
+        close = np.linalg.norm(phi[2:] - phi[:2]) < 1e-5
         invalid = (phi < 0).any() or (phi[0] + phi[1]) > 1 or (phi[2] + phi[3]) > 1
         return close or invalid
 
@@ -61,7 +60,7 @@ class TernaryStepper(BaseStepper):
         iteration = 0
 
         while np.linalg.norm(res) > 1e-8:
-            v, res, _ = self.projection(phi)
+            v, res, _ = self._projection(phi)
             if not self.is_terminate(phi + v):
                 phi = phi + v
             else:
@@ -83,7 +82,7 @@ if __name__ == "__main__":
     from scipy.linalg import null_space
 
     chi = 2.7
-    chi_12, chi_13, chi_23 = 3, 1.5, 1.5
+    chi_12, chi_13, chi_23 = 2.9, 1.5, 1.5
     chi_matrix = np.array(
         [
             [-2 * chi_13, chi_12 - chi_13 - chi_23],
