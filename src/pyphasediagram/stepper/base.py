@@ -37,10 +37,6 @@ class BaseStepper(ABC):
         """Return chemical potential and osmotic pressure differences between phases."""
 
     @abstractmethod
-    def phi_init(self) -> jnp.ndarray:
-        """Return initial feasible point on coexistence curve, shape (N,)."""
-
-    @abstractmethod
     def is_terminate(self, phi: jnp.ndarray) -> bool:
         """Return True if stepping should terminate at given phi."""
 
