@@ -95,7 +95,7 @@ class Spinodal:
         Compute the spinodal branches for phi1 in [phi1_i, phi1_f]
         and add them to the graph as nodes with attributes phi1, phi2, and pos=(phi1, phi2).
         """
-        phi1_vals = np.linspace(phi1_i, phi1_f)
+        phi1_vals = np.linspace(phi1_i, phi1_f, num_points)
         phi2_branches = self.phi2_from_phi1(phi1_vals)
 
         # Iterate over both branches
@@ -293,7 +293,8 @@ if __name__ == "__main__":
     import signal
     from tqdm import tqdm
 
-    chi_11, chi_22, chi_12 = -5.82460, -5.13075, -2.89596
+    chi_dr, chi_rs, chi_ds = 2.9, 1.5, 1.5
+    chi_11, chi_22, chi_12 = -2 * chi_ds, -2 * chi_rs, chi_dr - chi_rs - chi_ds
     chis = np.array([[chi_11, chi_12], [chi_12, chi_22]])
     spinodal = Spinodal(chis)
     spinodal.build()  # Monitor this method call
