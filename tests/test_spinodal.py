@@ -37,14 +37,21 @@ def simple_chis():
     return np.array([[1.0, 0.0], [0.0, 1.0]], dtype=float)
 
 
+@pytest.fixture
+def trivial_spinodal_graph():
+    G = nx.Graph()
+    # Create a trivial component with 3 nodes (ordering doesn't matter here)
+    p0 = SpinodalPoint(0, 0.10, 0.20)
+    p1 = SpinodalPoint(1, 0.20, 0.10)
+    p2 = SpinodalPoint(2, 0.30, 0.05)
+    G.add_edge(p0, p1)
+    G.add_edge(p1, p2)
+    return G
+
+
 # ----------------------------
 # Tests: Spinodal
 # ----------------------------
-
-
-@pytest.fixture
-def simple_chis():
-    return np.array([[-5, -2.5], [-5, -2.5]], dtype=float)
 
 
 def test_spinodal_init(simple_chis):
@@ -300,17 +307,12 @@ def test_third_derivative_vectorized_shapes(simple_chis):
 # ----------------------------
 
 
-def test_find_critical_points_appends_point(monkeypatch, simple_chis):
+def test_find_critical_points_appends_point(
+    monkeypatch, simple_chis, trivial_spinodal_graph
+):
     sp = Spinodal(simple_chis)
-    sp.spinodal_graph = nx.Graph()
+    sp.spinodal_graph = trivial_spinodal_graph
     sp.critical_points = []
-
-    # Create a trivial component with 3 nodes (ordering doesn't matter here)
-    p0 = SpinodalPoint(0, 0.10, 0.20)
-    p1 = SpinodalPoint(1, 0.20, 0.10)
-    p2 = SpinodalPoint(1, 0.30, 0.05)
-    sp.spinodal_graph.add_edge(p0, p1)
-    sp.spinodal_graph.add_edge(p1, p2)
 
     # Force _coords_from_subgraph to return known arrays of length 3
     # and force a third-derivative sign change across the two samples.
@@ -340,20 +342,16 @@ def test_find_critical_points_appends_point(monkeypatch, simple_chis):
     assert cp.phi2 == pytest.approx(0.075)
 
 
-def test_find_critical_points_handles_decreasing_xp_order(monkeypatch, simple_chis):
+def test_find_critical_points_handles_decreasing_xp_order(
+    monkeypatch, simple_chis, trivial_spinodal_graph
+):
     """
     This specifically tests the code path that sorts xp before np.interp.
-    If xp is [+2, +1, -1 ] (decreasing), interp would fail without sorting.
+    If xp is [1, -1, -2 ] (decreasing), interp would fail without sorting.
     """
     sp = Spinodal(simple_chis)
-    sp.spinodal_graph = nx.Graph()
+    sp.spinodal_graph = trivial_spinodal_graph
     sp.critical_points = []
-
-    p0 = SpinodalPoint(0, 0.0, 0.0)
-    p1 = SpinodalPoint(1, 0.0, 0.0)
-    p2 = SpinodalPoint(2, 0.0, 0.0)
-    sp.spinodal_graph.add_edge(p0, p1)
-    sp.spinodal_graph.add_edge(p1, p2)
 
     monkeypatch.setattr(
         sp,
@@ -363,7 +361,7 @@ def test_find_critical_points_handles_decreasing_xp_order(monkeypatch, simple_ch
 
     def fake_third_derivative(phi1, phi2):
         if np.ndim(phi1) > 0:
-            return np.array([+2.0, +1.0, -1.0])  # decreasing xp, but still crosses zero
+            return np.array([+1.0, -1.0, -2.0])  # decreasing xp, but still crosses zero
         return 0.0
 
     monkeypatch.setattr(sp, "_third_derivative", fake_third_derivative)
@@ -372,8 +370,8 @@ def test_find_critical_points_handles_decreasing_xp_order(monkeypatch, simple_ch
 
     assert len(sp.critical_points) == 1
     cp = sp.critical_points[0]
-    assert cp.phi1 == pytest.approx(0.5)
-    assert cp.phi2 == pytest.approx(0.3)
+    assert cp.phi1 == pytest.approx(0.3)
+    assert cp.phi2 == pytest.approx(0.5)
 
 
 def test_find_critical_points_raises_on_nan_third_derivative(monkeypatch, simple_chis):
