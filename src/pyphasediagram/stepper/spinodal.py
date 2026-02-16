@@ -3,8 +3,6 @@ import networkx as nx
 import matplotlib.pyplot as plt
 from pyphasediagram.stepper.point import SpinodalPoint, CriticalPoint
 
-# TODO: Critical Point are wrong. The third derivative calculations are likely correct, but finding the roots is not working correctly
-
 
 class Spinodal:
 
@@ -31,7 +29,7 @@ class Spinodal:
         """
         Compute the coefficients p and q of the quadratic equation for phi1/phi2 given phi2/phi1.
         """
-        a, b, c = self.chis[0, 0], self.chis[1, 1], self.chis[0, 1]
+        a, b, c = self.chis[1, 1], self.chis[0, 0], self.chis[0, 1]
         if is_calculate_phi2 == False:
             a, b = b, a  # swap a and b if computing phi1 from phi2
         det = a * b - c**2
@@ -241,14 +239,12 @@ class Spinodal:
                 plt.plot(phi1s, phi2s, label="Spinodal curve")
             else:
                 plt.plot(phi1s, phi2s)
-            # plt.scatter(phi1s[0], phi2s[0], alpha=0.45)
-            # plt.scatter(phi1s[-1], phi2s[-1], alpha=0.45)
+
         for i, crit_pt in enumerate(self.critical_points):
             if i == 0:
                 crit_pt.plot(s=50, label="Critical point(s)", zorder=5)
             else:
                 crit_pt.plot(s=50, zorder=5)
-            plt.scatter(crit_pt.phi2, crit_pt.phi1, s=50, zorder=5)
         plt.xlim(0, 1)
         plt.ylim(0, 1)
         plt.plot([0, 1], [1, 0], "k--")
