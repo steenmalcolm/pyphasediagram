@@ -32,7 +32,7 @@ class TernaryStepper(BaseStepper):
     def is_terminate(self, phi: np.ndarray) -> bool:
         """Stop when phases become too similar or invalid composition."""
 
-        close = np.linalg.norm(phi[2:] - phi[:2]) < 1e-2
+        close = np.linalg.norm(phi[2:] - phi[:2]) < 1e-3
         invalid = (phi < 0).any() or (phi[0] + phi[1]) > 1 or (phi[2] + phi[3]) > 1
         return close or invalid
 
@@ -40,7 +40,8 @@ class TernaryStepper(BaseStepper):
         """Find the binary coexistence point for the given Flory parameter."""
         # chi_12 = float(chi[0, 1] - 0.5 * (chi[0, 0] + chi[1, 1]))
         if chi < 2:
-            raise RuntimeError(f"Flory parameter must be > 2 but is {chi:.2f}")
+            print(f"Warning: Chi value {chi:.2f}<2 too low for phase separation")
+            return None
 
         eq_func = lambda x: np.log(x / (1 - x)) + chi * (1 - 2 * x)
         sol = root(eq_func, 1e-4)
@@ -60,12 +61,17 @@ class TernaryStepper(BaseStepper):
         # nearly-binary start
         phi_init: np.ndarray = None
         v_init: np.ndarray = None
-        if which_comp == 0:
+        phi_bin: float = None
+
+        if (
+            which_comp == 0
+        ):  # Phase separation between components 1 and 2, component 0 is dilute
             chi = self.chis[0, 1] - 0.5 * (self.chis[0, 0] + self.chis[1, 1])
             phi_bin = self.binary_state(chi)
             phi_init = np.array([phi_bin, 1 - phi_bin, 1 - phi_bin, phi_bin]) - 1e-4
             v_init = np.array([-1, -1, -1, -1])
 
+        # Phase separation between components 0 and 2, component 1 is dilute
         elif which_comp == 1:
             chi = -0.5 * self.chis[1, 1]
             phi_bin = self.binary_state(chi)
@@ -74,6 +80,7 @@ class TernaryStepper(BaseStepper):
             phi_init[2] = 1 - phi_init[2] - phi_init[3]
             v_init = np.array([1, 0, 1, 0])
 
+        # Phase separation between components 0 and 1, component 2 is dilute
         elif which_comp == 2:
             chi = -0.5 * self.chis[0, 0]
             phi_bin = self.binary_state(chi)
@@ -81,6 +88,10 @@ class TernaryStepper(BaseStepper):
             phi_init[1] = 1 - phi_init[0] - phi_init[1]
             phi_init[3] = 1 - phi_init[2] - phi_init[3]
             v_init = np.array([0, 1, 0, 1])
+
+        # No phase separation in this binary limit, return None to indicate failure to initialize
+        if phi_bin == None:
+            return None, None
 
         res = self._residual_jit(phi_init)
         max_iter = 1000
@@ -107,38 +118,38 @@ if __name__ == "__main__":
     import matplotlib.pyplot as plt
     import time
 
-    chi = 2.7
-    chi_12, chi_13, chi_23 = np.random.random(3) + 2
-    chi_matrix = np.array(
-        [
-            [-2 * chi_13, chi_12 - chi_13 - chi_23],
-            [chi_12 - chi_13 - chi_23, -2 * chi_23],
-        ]
-    )
-    chi_matrix = np.array([[-4.84224323, -2.84572992], [-2.84572992, -5.44663668]])
-    obj = TernaryStepper(chi_matrix)
-    n = time.perf_counter()
-    for which_comp in range(3):
-        phi_init, v_init = obj.binary_init(which_comp)
-        phi_arr, sv_list = obj.run(phi_init, v_init)
-    # v_t_init = np.array([-1, -1, -1, -1], dtype=float)
-    # obj.run(phi_init, v_t_init)
-    # print(f"took {time.perf_counter() - n:.2f} seconds")
+    from pyphasediagram.stepper.spinodal import Spinodal
 
-    # print(len(obj.bins_list))
-    # plt.figure(figsize=(10, 10))
-    # colormap = plt.cm.viridis
-    # for i, b in enumerate(obj.bins_list):
-    #     print(b.shape)
-    #     plt.plot(b[0, 0], b[0, 1], "r")
-    #     plt.plot(b[1, 0], b[1, 1], "b")
-    #     color = colormap(i / len(obj.bins_list))
-    #     plt.scatter(b[0, 0, 0], b[0, 1, 0], color=color, s=10, alpha=0.5)
-    #     plt.scatter(b[1, 0, 0], b[1, 1, 0], color=color, s=10, alpha=0.5)
-    #     plt.scatter(b[0, 0, -1], b[0, 1, -1], color=color, s=10, alpha=0.5)
-    #     plt.scatter(b[1, 0, -1], b[1, 1, -1], color=color, s=10, alpha=0.5)
-    #     plt.xlim(0, 1)
-    #     plt.ylim(0, 1)
-    #     plt.xticks([])
-    #     plt.yticks([])
-    # plt.show()
+    for i in range(10):
+        # Phase separation between components 0 and 2
+        chi_12, chi_01, chi_02 = np.random.random(3) + 2
+        chis = np.array(
+            [
+                [-2 * chi_01, chi_12 - chi_01 - chi_02],
+                [chi_12 - chi_01 - chi_02, -2 * chi_02],
+            ]
+        )
+        obj = TernaryStepper(chis)
+        sp = Spinodal(chis)
+        sp.build()
+        sp.plot()
+        for j in range(3):
+            phi_init, v_init = obj.binary_init(j)
+            if phi_init == None:
+                continue
+            n = time.perf_counter()
+            phi_arr, sv_list = obj.run(phi_init, v_init)
+            print("Time taken for ternary stepper: ", time.perf_counter() - n)
+            sp.critical_points
+            plt.plot(phi_arr[0, 0], phi_arr[0, 1], color="red")
+            plt.plot(phi_arr[1, 0], phi_arr[1, 1], color="red")
+
+            phia, phib = phi_arr[:, :, -1]
+            if np.linalg.norm(phia - phib) < 1e-3:
+                phi_c = np.mean(phi_arr[:, :, -1], axis=0)
+                # if np.linalg.norm(np.diff(phi_arr[:,:,-2:],axis=-1)[:,:,-1])
+                print(
+                    f"Binodal critical point allignes with spinodal {abs(sp._third_derivative(phi_c[0], phi_c[1]))<1e-2}"
+                )
+        plt.savefig(f"delete/{i}.png")
+        plt.close()
