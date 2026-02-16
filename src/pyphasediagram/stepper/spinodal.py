@@ -3,6 +3,8 @@ import networkx as nx
 import matplotlib.pyplot as plt
 from pyphasediagram.stepper.point import SpinodalPoint, CriticalPoint
 
+# TODO: Critical Point are wrong. The third derivative calculations are likely correct, but finding the roots is not working correctly
+
 
 class Spinodal:
 
@@ -202,14 +204,14 @@ class Spinodal:
             root_idxs = np.where(np.diff(np.sign(third_deriv)))[0]
 
             for r_idx in root_idxs:
-                dphi1 = phi1[r_idx + 1] - phi1[r_idx - 1]
-                dphi2 = phi2[r_idx + 1] - phi2[r_idx - 1]
+                dphi1 = phi1[r_idx + 1] - phi1[r_idx]
+                dphi2 = phi2[r_idx + 1] - phi2[r_idx]
                 # For np.interp to work, we need to ensure the third_deriv values at r_idx and r_idx+1 are in increasing order. If not, swap them.
                 xp = third_deriv[r_idx : r_idx + 2]
                 phi1p, phi2p = phi1[r_idx : r_idx + 2], phi2[r_idx : r_idx + 2]
-                order = np.argsort(third_deriv[r_idx : r_idx + 2])
-                phi1_c = np.interp(0, xp[order], phi1p[order])
-                phi2_c = np.interp(0, xp[order], phi2p[order])
+                o = np.argsort(third_deriv[r_idx : r_idx + 2])
+                phi1_c = np.interp(0, xp[o], phi1p[o])
+                phi2_c = np.interp(0, xp[o], phi2p[o])
                 td_c = self._third_derivative(phi1_c, phi2_c)
                 if td_c > 1e-2:
                     Warning(
@@ -246,6 +248,7 @@ class Spinodal:
                 crit_pt.plot(s=50, label="Critical point(s)", zorder=5)
             else:
                 crit_pt.plot(s=50, zorder=5)
+            plt.scatter(crit_pt.phi2, crit_pt.phi1, s=50, zorder=5)
         plt.xlim(0, 1)
         plt.ylim(0, 1)
         plt.plot([0, 1], [1, 0], "k--")
