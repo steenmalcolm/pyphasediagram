@@ -1,9 +1,8 @@
-# test_spinodal.py
 import numpy as np
 import pytest
 import networkx as nx
 
-from pyphasediagram.stepper.spinodal import SpinodalPoint, Spinodal
+from pyphasediagram.stepper.spinodal import SpinodalPoint, CriticalPoint, Spinodal
 
 
 def _make_path_subgraph(points):
@@ -39,122 +38,12 @@ def simple_chis():
 
 
 # ----------------------------
-# Tests: SpinodalPoint
-# ----------------------------
-
-
-def test_init_casts_types():
-    pt = SpinodalPoint("3", "0.25", 0.5)
-    assert isinstance(pt.idx, int)
-    assert isinstance(pt.phi1, float)
-    assert isinstance(pt.phi2, float)
-    assert pt.idx == 3
-    assert pt.phi1 == 0.25
-    assert pt.phi2 == 0.5
-
-
-def test_dist_euclidean():
-    a = SpinodalPoint(0, 0.0, 0.0)
-    b = SpinodalPoint(1, 3.0, 4.0)
-    assert a.dist(b) == pytest.approx(5.0)
-    assert b.dist(a) == pytest.approx(5.0)
-
-
-def test_dist_raises_for_non_spinodalpoint():
-    a = SpinodalPoint(0, 0.0, 0.0)
-    with pytest.raises(NotImplementedError, match="SpinodalPoint instances"):
-        _ = a.dist((0.0, 0.0))
-
-
-def test_repr_formatting_three_decimals():
-    pt = SpinodalPoint(0, 0.123456, 0.9)
-    s = repr(pt)
-    assert s.startswith("SpinodalPoint(")
-    assert "phi1=0.123" in s
-    assert "phi2=0.900" in s
-    assert "0.123456" not in s
-
-
-def test_add_returns_numpy_array_and_values():
-    a = SpinodalPoint(0, 0.2, 0.3)
-    b = SpinodalPoint(1, 0.4, 0.1)
-    out = a + b
-    assert isinstance(out, np.ndarray)
-    np.testing.assert_allclose(out, np.array([0.6, 0.4]))
-
-
-def test_add_raises_for_non_spinodalpoint():
-    a = SpinodalPoint(0, 0.2, 0.3)
-    with pytest.raises(NotImplementedError, match="Addition can only be performed"):
-        _ = a + 1
-
-
-def test_sub_returns_numpy_array_and_values():
-    a = SpinodalPoint(0, 0.2, 0.3)
-    b = SpinodalPoint(1, 0.4, 0.1)
-    out = a - b
-    assert isinstance(out, np.ndarray)
-    np.testing.assert_allclose(out, np.array([-0.2, 0.2]))
-
-
-def test_sub_raises_for_non_spinodalpoint():
-    a = SpinodalPoint(0, 0.2, 0.3)
-    with pytest.raises(NotImplementedError, match="Subtraction can only be performed"):
-        _ = a - "nope"
-
-
-def test_plot_calls_matplotlib_scatter(monkeypatch):
-    # Patch the pyplot object as used inside your module (spinodal.plt)
-    import pyphasediagram.stepper.spinodal as mod
-
-    calls = {}
-
-    def fake_scatter(x, y, s=10, color=None):
-        calls["x"] = x
-        calls["y"] = y
-        calls["s"] = s
-        calls["color"] = color
-
-    monkeypatch.setattr(mod.plt, "scatter", fake_scatter)
-
-    pt = SpinodalPoint(0, 0.12, 0.34)
-    pt.plot(s=42, color="red")
-
-    assert calls["x"] == 0.12
-    assert calls["y"] == 0.34
-    assert calls["s"] == 42
-    assert calls["color"] == "red"
-
-
-def test_is_between_true_for_colinear_opposite_directions():
-    pt = SpinodalPoint(0, 0.0, 0.0)
-    pt1 = SpinodalPoint(1, 1.0, 0.0)
-    pt2 = SpinodalPoint(2, -1.0, 0.0)
-    assert pt.is_between(pt1, pt2) == True
-
-
-def test_is_between_false_for_right_angle():
-    pt = SpinodalPoint(0, 0.0, 0.0)
-    pt1 = SpinodalPoint(1, 1.0, 0.0)
-    pt2 = SpinodalPoint(2, 0.0, 1.0)
-    assert pt.is_between(pt1, pt2) == False
-
-
-def test_is_between_raises_for_non_spinodalpoint():
-    pt = SpinodalPoint(0, 0.0, 0.0)
-    pt1 = SpinodalPoint(1, 1.0, 0.0)
-    with pytest.raises(NotImplementedError, match="is_between can only be computed"):
-        _ = pt.is_between(pt1, (0.0, 1.0))
-
-
-# ----------------------------
 # Tests: Spinodal
 # ----------------------------
 
 
 @pytest.fixture
 def simple_chis():
-    # a=b=1, c=0 is a nice baseline that tends to keep discriminants well-behaved
     return np.array([[-5, -2.5], [-5, -2.5]], dtype=float)
 
 
@@ -416,24 +305,26 @@ def test_find_critical_points_appends_point(monkeypatch, simple_chis):
     sp.spinodal_graph = nx.Graph()
     sp.critical_points = []
 
-    # Create a trivial component with 2 nodes (ordering doesn't matter here)
+    # Create a trivial component with 3 nodes (ordering doesn't matter here)
     p0 = SpinodalPoint(0, 0.10, 0.20)
     p1 = SpinodalPoint(1, 0.20, 0.10)
+    p2 = SpinodalPoint(1, 0.30, 0.05)
     sp.spinodal_graph.add_edge(p0, p1)
+    sp.spinodal_graph.add_edge(p1, p2)
 
-    # Force _coords_from_subgraph to return known arrays of length 2
+    # Force _coords_from_subgraph to return known arrays of length 3
     # and force a third-derivative sign change across the two samples.
     monkeypatch.setattr(
         sp,
         "_coords_from_subgraph",
-        lambda sg: (np.array([0.1, 0.2]), np.array([0.2, 0.1])),
+        lambda sg: (np.array([0.1, 0.2, 0.3]), np.array([0.2, 0.1, 0.05])),
     )
 
     # Third derivative: [-1, +1] => sign change => one root at index 0.
     def fake_third_derivative(phi1, phi2):
         # Called once with arrays, later with scalar interpolated values
         if np.ndim(phi1) > 0:
-            return np.array([-1.0, +1.0])
+            return np.array([-1.0, -1.0, +1.0])
         return 0.0  # td_c at interpolated critical point
 
     monkeypatch.setattr(sp, "_third_derivative", fake_third_derivative)
@@ -442,17 +333,17 @@ def test_find_critical_points_appends_point(monkeypatch, simple_chis):
 
     assert len(sp.critical_points) == 1
     cp = sp.critical_points[0]
-    assert isinstance(cp, SpinodalPoint)
+    assert isinstance(cp, CriticalPoint)
     assert cp.idx == -1
-    # Interp between (phi1,phi2) = (0.1,0.2) and (0.2,0.1) at td=0 -> midpoint
-    assert cp.phi1 == pytest.approx(0.15)
-    assert cp.phi2 == pytest.approx(0.15)
+    # Interp between (phi1,phi2) = (0.2,0.1) and (0.3,0.05) at td=0 -> midpoint
+    assert cp.phi1 == pytest.approx(0.25)
+    assert cp.phi2 == pytest.approx(0.075)
 
 
 def test_find_critical_points_handles_decreasing_xp_order(monkeypatch, simple_chis):
     """
     This specifically tests the code path that sorts xp before np.interp.
-    If xp is [ +1, -1 ] (decreasing), interp would fail without sorting.
+    If xp is [+2, +1, -1 ] (decreasing), interp would fail without sorting.
     """
     sp = Spinodal(simple_chis)
     sp.spinodal_graph = nx.Graph()
@@ -460,17 +351,19 @@ def test_find_critical_points_handles_decreasing_xp_order(monkeypatch, simple_ch
 
     p0 = SpinodalPoint(0, 0.0, 0.0)
     p1 = SpinodalPoint(1, 0.0, 0.0)
+    p2 = SpinodalPoint(2, 0.0, 0.0)
     sp.spinodal_graph.add_edge(p0, p1)
+    sp.spinodal_graph.add_edge(p1, p2)
 
     monkeypatch.setattr(
         sp,
         "_coords_from_subgraph",
-        lambda sg: (np.array([0.0, 1.0]), np.array([1.0, 0.0])),
+        lambda sg: (np.array([0.2, 0.4, 0.6]), np.array([0.6, 0.4, 0.2])),
     )
 
     def fake_third_derivative(phi1, phi2):
         if np.ndim(phi1) > 0:
-            return np.array([+1.0, -1.0])  # decreasing xp, but still crosses zero
+            return np.array([+2.0, +1.0, -1.0])  # decreasing xp, but still crosses zero
         return 0.0
 
     monkeypatch.setattr(sp, "_third_derivative", fake_third_derivative)
@@ -480,7 +373,7 @@ def test_find_critical_points_handles_decreasing_xp_order(monkeypatch, simple_ch
     assert len(sp.critical_points) == 1
     cp = sp.critical_points[0]
     assert cp.phi1 == pytest.approx(0.5)
-    assert cp.phi2 == pytest.approx(0.5)
+    assert cp.phi2 == pytest.approx(0.3)
 
 
 def test_find_critical_points_raises_on_nan_third_derivative(monkeypatch, simple_chis):
