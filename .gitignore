@@ -6,3 +6,5 @@ report
 *.egg-info
 src/pyphasediagram/depr
 .DS_Store
+.vscode
+delete
