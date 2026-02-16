@@ -11,10 +11,10 @@ class Point:
         self.phi2 = float(phi2)
 
     def dist(self, pt) -> float:
-        """Euclidean distance between this point and another SpinodalPoint."""
-        if not isinstance(pt, SpinodalPoint):
+        """Euclidean distance between this point and another Point."""
+        if not isinstance(pt, Point):
             raise NotImplementedError(
-                "Distance can only be computed between SpinodalPoint instances."
+                "Distance can only be computed between Point instances."
             )
         return np.sqrt((self.phi1 - pt.phi1) ** 2 + (self.phi2 - pt.phi2) ** 2)
 
