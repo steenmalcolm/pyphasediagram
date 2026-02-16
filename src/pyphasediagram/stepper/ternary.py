@@ -1,10 +1,8 @@
-import time
-
 import jax.numpy as jnp
 import numpy as np
 from scipy.optimize import root
+
 from pyphasediagram.stepper.base import BaseStepper
-from pyphasediagram.stepper.point import BinodalPoint
 
 
 class TernaryStepper(BaseStepper):
@@ -29,16 +27,20 @@ class TernaryStepper(BaseStepper):
 
         return jnp.hstack((mu_diff, pi_diff))  # (3,)
 
-    def is_terminate(self, phi: np.ndarray) -> bool:
+    def is_terminate(self, phi: jnp.ndarray) -> jnp.ndarray:
         """Stop when phases become too similar or invalid composition."""
+        # IMPORTANT: This must be JAX-traceable for the fully-jitted run loop.
 
-        close = np.linalg.norm(phi[2:] - phi[:2]) < 1e-3
-        invalid = (phi < 0).any() or (phi[0] + phi[1]) > 1 or (phi[2] + phi[3]) > 1
-        return close or invalid
+        close = jnp.linalg.norm(phi[2:] - phi[:2]) < 1e-3
+
+        invalid = jnp.logical_or(jnp.any(phi < 0.0), (phi[0] + phi[1]) > 1.0)
+        invalid = jnp.logical_or(invalid, (phi[2] + phi[3]) > 1.0)
+
+        return jnp.logical_or(close, invalid)
 
     def binary_state(self, chi) -> float:
         """Find the binary coexistence point for the given Flory parameter."""
-        # chi_12 = float(chi[0, 1] - 0.5 * (chi[0, 0] + chi[1, 1]))
+        # This is initialization (SciPy); it does not need to be jitted to run the main stepper loop.
         if chi < 2:
             print(f"Warning: Chi value {chi:.2f}<2 too low for phase separation")
             return None
@@ -51,14 +53,7 @@ class TernaryStepper(BaseStepper):
 
     def binary_init(self, which_comp: int = 0) -> jnp.ndarray:
         """Find an initial coexistence point for the dilute limit of one component"""
-        # chi_12, chi_13, chi_23 = 2.9, 1.5, 1.5
-        # chi_matrix = np.array(
-        #     [
-        #         [-2 * chi_13, chi_12 - chi_13 - chi_23],
-        #         [chi_12 - chi_13 - chi_23, -2 * chi_23],
-        #     ]
 
-        # nearly-binary start
         phi_init: np.ndarray = None
         v_init: np.ndarray = None
         phi_bin: float = None
@@ -90,20 +85,25 @@ class TernaryStepper(BaseStepper):
             v_init = np.array([0, 1, 0, 1])
 
         # No phase separation in this binary limit, return None to indicate failure to initialize
-        if phi_bin == None:
+        if phi_bin is None:
             return None, None
 
-        res = self._residual_jit(phi_init)
+        # Keep initialization in NumPy/Python; convert to JAX arrays at the end
+        res = np.asarray(self._residual_jit(jnp.asarray(phi_init)))
         max_iter = 1000
         iteration = 0
 
         while np.linalg.norm(res) > 1e-8:
-            v, res, _ = self._projection(phi_init)
-            if not self.is_terminate(phi_init + v):
+            v, res_jax, _ = self._projection(jnp.asarray(phi_init))
+            v = np.asarray(v)
+            res = np.asarray(res_jax)
+
+            # Use JAX-compatible termination check (works both in and out of jit)
+            if not bool(self.is_terminate(jnp.asarray(phi_init + v))):
                 phi_init = phi_init + v
             else:
                 vv = v
-                while self.is_terminate(phi_init - vv):
+                while bool(self.is_terminate(jnp.asarray(phi_init - vv))):
                     vv = vv * 0.5
                 phi_init = phi_init - vv
 
@@ -111,7 +111,7 @@ class TernaryStepper(BaseStepper):
                 raise RuntimeError("In binary_init: Projection not converging")
             iteration += 1
 
-        return phi_init, v_init
+        return jnp.asarray(phi_init), jnp.asarray(v_init)
 
 
 if __name__ == "__main__":
@@ -120,7 +120,8 @@ if __name__ == "__main__":
 
     from pyphasediagram.stepper.spinodal import Spinodal
 
-    for i in range(10):
+    np.random.seed(42)
+    for i in range(100):
         # Phase separation between components 0 and 2
         chi_12, chi_01, chi_02 = np.random.random(3) + 2
         chis = np.array(
@@ -129,27 +130,31 @@ if __name__ == "__main__":
                 [chi_12 - chi_01 - chi_02, -2 * chi_02],
             ]
         )
+        # sp = Spinodal(chis)
+        # sp.build()
+        # sp.plot()
+        n_start = time.perf_counter()
         obj = TernaryStepper(chis)
-        sp = Spinodal(chis)
-        sp.build()
-        sp.plot()
         for j in range(3):
             phi_init, v_init = obj.binary_init(j)
             if phi_init == None:
                 continue
-            n = time.perf_counter()
-            phi_arr, sv_list = obj.run(phi_init, v_init)
-            print("Time taken for ternary stepper: ", time.perf_counter() - n)
-            sp.critical_points
-            plt.plot(phi_arr[0, 0], phi_arr[0, 1], color="red")
-            plt.plot(phi_arr[1, 0], phi_arr[1, 1], color="red")
+            phi_arr, sv_arr = obj.run(phi_init, v_init)
+            # sp.critical_points
+        #     plt.plot(phi_arr[0, 0], phi_arr[0, 1], color="red")
+        #     plt.plot(phi_arr[1, 0], phi_arr[1, 1], color="red")
+        #     plt.scatter(phi_arr[0, 0], phi_arr[0, 1], color="red", s=1)
+        #     plt.scatter(phi_arr[1, 0], phi_arr[1, 1], color="red", s=1)
 
-            phia, phib = phi_arr[:, :, -1]
-            if np.linalg.norm(phia - phib) < 1e-3:
-                phi_c = np.mean(phi_arr[:, :, -1], axis=0)
-                # if np.linalg.norm(np.diff(phi_arr[:,:,-2:],axis=-1)[:,:,-1])
-                print(
-                    f"Binodal critical point allignes with spinodal {abs(sp._third_derivative(phi_c[0], phi_c[1]))<1e-2}"
-                )
-        plt.savefig(f"delete/{i}.png")
-        plt.close()
+        #     phia, phib = phi_arr[:, :, -1]
+        #     if np.linalg.norm(phia - phib) < 1e-3:
+        #         phi_c = np.mean(phi_arr[:, :, -1], axis=0)
+        #         # if np.linalg.norm(np.diff(phi_arr[:,:,-2:],axis=-1)[:,:,-1])
+        #         td = abs(sp._third_derivative(phi_c[0], phi_c[1]))
+        #         if td > 1e-2:
+        #             print(
+        #                 f"\nBinodal critical point does not align with spinodal: td = {td:.2g}\n\t"
+        #             )
+        print(f"{i} Total time: {time.perf_counter() - n_start:.2f}")
+        # plt.savefig(f"delete/{i+10}.png")
+        # plt.close()
