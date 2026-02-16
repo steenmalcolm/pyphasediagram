@@ -66,27 +66,12 @@ class BaseStepper(ABC):
         J_pinv = (Vt.T * S_inv) @ U.T
         return -J_pinv @ E, E, abs(S).min()
 
-    def _project(self, phi: jnp.ndarray, res: jnp.ndarray) -> jnp.ndarray:
-        """Iteratively project phi back to the manifold until residual is small enough. Returns the next smallest singular value"""
-
-        sv: float = None
-        n_projections = 0
-        while np.linalg.norm(res) > 1e-10:
-            v_n, res, sv = self._projection(phi)
-            phi += v_n
-            if n_projections > 100:
-                raise RuntimeError(
-                    f"Projection did not converge after {n_projections} iterations"
-                )
-            n_projections += 1
-        return sv
-
     def run(
         self,
         phi_init: np.ndarray,
         v_init: np.ndarray,
         delta_0=2e-4,
-        delta_1=2e-3,
+        delta_1=1e-3,
     ):
         """Executes the stepping procedure and returns the coexistance curve"""
 
@@ -122,7 +107,16 @@ class BaseStepper(ABC):
             phi_new = phi_new + delta * v_t
             res_new = self._residual_jit(phi_new)
 
-            sv = self._project(phi_new, res_new)
+            # project back to manifold
+            proj_counter = 0
+            while np.linalg.norm(res_new) > 1e-10:
+                v_n, res_new, sv = self._projection(phi_new)
+                phi_new = phi_new + v_n
+                if proj_counter > 100:
+                    raise RuntimeError(
+                        f"Projection did not converge after {proj_counter} iterations"
+                    )
+                proj_counter += 1
 
             if np.isnan(phi_new).any():
                 raise RuntimeError(f"Binodal NaN encountered after {steps} steps")
@@ -155,28 +149,32 @@ class BaseStepper(ABC):
 
 if __name__ == "__main__":
 
+    from pyphasediagram.stepper.spinodal import Spinodal
+
+    sp = Spinodal(self.chis)
+    sp.build()
+    sp.plot()
+    phi1_c, phi2_c = np.mean(phi_new[::2]), np.mean(phi_new[1::2])
+    print(
+        sp._third_derivative(phi1_c, phi2_c),
+        sp._third_derivative(phi_new[0], phi_new[1]),
+        sp._third_derivative(phi_new[2], phi_new[3]),
+    )
     import matplotlib.pyplot as plt
 
     phi_arr = np.transpose(
         np.array(phi_list).reshape(-1, 2, len(phi_new) // 2), axes=(1, 2, 0)
     )
-    phi_arr = phi_arr[:, :, -50:]
-    plt.scatter(phi_arr[0, 0], phi_arr[0, 1], s=5)
-    plt.scatter(phi_arr[1, 0], phi_arr[1, 1], s=5)
-    plt.plot(phi_arr[0, 0], phi_arr[0, 1])
-    plt.plot(phi_arr[1, 0], phi_arr[1, 1])
+    plt.scatter(phi_arr[0, 1], phi_arr[0, 0], s=5)
+    plt.scatter(phi_arr[1, 1], phi_arr[1, 0], s=5)
+    plt.plot(phi_arr[0, 1], phi_arr[0, 0])
+    plt.plot(phi_arr[1, 1], phi_arr[1, 0])
     plt.scatter(phi_arr[0, 0, 0], phi_arr[0, 1, 0], color="red")
     plt.scatter(phi_arr[1, 0, 0], phi_arr[1, 1, 0], color="red")
     plt.scatter(phi_arr[0, 0, -1], phi_arr[0, 1, -1], color="blue")
     plt.scatter(phi_arr[1, 0, -1], phi_arr[1, 1, -1], color="blue")
-    n = [359]
-    plt.scatter(
-        phi_arr[0, 0, n], phi_arr[0, 1, n], color="yellow", edgecolor="black", zorder=5
-    )
-    plt.scatter(
-        phi_arr[1, 0, n], phi_arr[1, 1, n], color="yellow", edgecolor="black", zorder=5
-    )
     plt.plot([0, 1], [1, 0], "k--")
+    plt.plot([0, 0], [1 / 2, 1 / 2], "k--")
     plt.xlim(0, 1)
     plt.ylim(0, 1)
 
@@ -206,3 +204,14 @@ if __name__ == "__main__":
         d /= np.linalg.norm(d)
         plt.plot([0, d[0]], [0, d[1]], color=colors[i], label=f"{i}", alpha=0.5)
         plt.plot([0, d[2]], [0, d[3]], color=colors[i], alpha=0.5)
+
+        # # project back to manifold
+        # proj_counter = 0
+        # while np.linalg.norm(res_new) > 1e-8:
+        #     v_n, res_new = self.projection(phi_new)
+        #     phi_new = phi_new + v_n
+        #     if proj_counter > 100:
+        #         raise RuntimeError(
+        #             f"Projection did not converge after {proj_counter} iterations"
+        #         )
+        #     proj_counter += 1
