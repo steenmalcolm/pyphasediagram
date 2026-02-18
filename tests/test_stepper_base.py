@@ -7,6 +7,9 @@ import jax.numpy as jnp
 # Import your BaseStepper from your package
 from pyphasediagram.stepper.base import BaseStepper
 
+# TODO: Add End-to-end tests that build a full graph and check for expected properties such as geometry and orientation of critical point
+# and include tests on symmetric system for 2.5<chi<3.2
+
 
 @pytest.fixture(scope="module")
 def chis():

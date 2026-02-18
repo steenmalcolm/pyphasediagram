@@ -2,10 +2,10 @@ import numpy as np
 import pytest
 import networkx as nx
 
-from pyphasediagram.stepper.spinodal import SpinodalPoint, CriticalPoint, Spinodal
+from pyphasediagram.spinodal import SpinodalPoint, CriticalPoint, Spinodal
 
 # TODO: Add End-to-end tests that build a full spinodal graph and check for expected properties such as geometry and orientation of critical point
-# and include tests on symmetric system for 2.5<chi<3.2 
+# and include tests on symmetric system for 2.5<chi<3.2
 
 
 def _make_path_subgraph(points):

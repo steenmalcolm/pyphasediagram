@@ -1,7 +1,7 @@
 import numpy as np
 import networkx as nx
 import matplotlib.pyplot as plt
-from pyphasediagram.stepper.point import SpinodalPoint, CriticalPoint
+from pyphasediagram.point import SpinodalPoint, CriticalPoint
 
 
 class Spinodal:

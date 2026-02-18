@@ -1,6 +1,6 @@
 import pytest
 import numpy as np
-from pyphasediagram.stepper.point import Point, SpinodalPoint, CriticalPoint
+from pyphasediagram.point import Point, SpinodalPoint, CriticalPoint
 
 # ----------------------------
 # Tests: Point
@@ -75,7 +75,7 @@ def test_sub_raises_for_non_spinodalpoint():
 
 def test_plot_calls_matplotlib_scatter(monkeypatch):
     # Patch the pyplot object
-    import pyphasediagram.stepper.point as mod
+    import pyphasediagram.point as mod
 
     calls = {}
 

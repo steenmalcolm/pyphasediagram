@@ -1,7 +1,7 @@
 # binodal.py
 import networkx as nx
 import numpy as np
-from pyphasediagram.stepper.point import CriticalPoint, BinodalPoint
+from pyphasediagram.point import CriticalPoint, BinodalPoint
 
 
 class Binodal:
