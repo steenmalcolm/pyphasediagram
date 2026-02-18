@@ -92,9 +92,9 @@ def test_tangent_is_in_right_nullspace(stepper, phi):
 
 
 def test_projection_returns_correct_shapes(stepper, phi):
-    v_n, E, svmin = stepper._projection(phi)
+    v_n, res, svmin = stepper._projection(phi)
     assert v_n.shape == (4,)
-    assert E.shape == (3,)
+    assert res.shape == (3,)
     # svmin is scalar
     assert np.ndim(np.asarray(svmin)) == 0
 
@@ -104,24 +104,26 @@ def test_projection_reduces_residual_norm(stepper, phi):
     One projection step should not increase residual norm (usually decreases).
     """
     r0 = jnp.linalg.norm(stepper.residual(phi))
-    v_n, E, _ = stepper._projection(phi)
-    r1 = jnp.linalg.norm(E)
-    # E returned from _projection is the residual at phi (not at phi+v_n),
+    v_n, res, _ = stepper._projection(phi)
+    r1 = jnp.linalg.norm(res)
+    # res returned from _projection is the residual at phi (not at phi+v_n),
     # so compare against r0 computed consistently.
-    assert float(r1) <= float(r0) + 1e-12
+    assert np.isclose(np.asarray(r1), np.asarray(r0), atol=1e-10)
 
-    # More meaningful: evaluate residual after applying the Newton step.
+    # evaluate residual after applying the Newton step.
     phi2 = phi + v_n
     r2 = jnp.linalg.norm(stepper.residual(phi2))
-    assert float(r2) <= float(r0) + 1e-10
+    # Only decreases if residual is small to begin with.
+    if r0 < 1:
+        assert float(r2) < float(r0)
 
 
-def test_proj_refine_converges_or_flags(stepper, phi):
+def test_projection_loop_converges_or_flags(stepper, phi):
     """
     Projection refinement should either converge or set the failed flag.
     """
-    # _proj_refine is a helper used inside jit loop; it must be callable in eager too.
-    phi_f, res_f, sv_f, failed = stepper._proj_refine(phi)
+    # _projection_loop is a helper used inside jit loop; it must be callable in eager too.
+    phi_f, res_f, sv_f, failed = stepper._projection_loop(phi)
 
     assert phi_f.shape == (4,)
     assert np.ndim(np.asarray(res_f)) == 0

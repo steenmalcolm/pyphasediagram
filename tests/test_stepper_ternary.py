@@ -4,6 +4,8 @@ import jax.numpy as jnp
 
 from pyphasediagram.stepper.ternary import TernaryStepper
 
+# TODO: unit test where _projection_loop WILL fail
+
 
 @pytest.fixture(scope="module")
 def chis():

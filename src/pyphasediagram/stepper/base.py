@@ -10,7 +10,7 @@ jax.config.update("jax_enable_x64", True)
 
 class BaseStepper(ABC):
     """
-    Base class for numerical tracing of a coexistence curve E(phi)=0 (M=N-1).
+    Base class for numerical tracing of a coexistence curve res(phi)=0 (M=N-1).
     Subclasses must implement: residual(phi), phi_init(), is_terminate(phi).
     """
 
@@ -28,10 +28,6 @@ class BaseStepper(ABC):
             static_argnames=["max_steps"],
         )
 
-    def _svd(self, J, full_matrices=False):
-        U, S, Vt = jnp.linalg.svd(J, full_matrices=full_matrices)
-        return U, S, Vt
-
     @abstractmethod
     def residual(self, phi: jnp.ndarray) -> jnp.ndarray:
         """Return chemical potential and osmotic pressure differences between phases."""
@@ -42,6 +38,10 @@ class BaseStepper(ABC):
         # IMPORTANT: to be fully jittable, subclasses must implement this using JAX ops
         # and return a scalar boolean-like jnp.ndarray (dtype=bool).
 
+    def _svd(self, J, full_matrices=False):
+        U, S, Vt = jnp.linalg.svd(J, full_matrices=full_matrices)
+        return U, S, Vt
+
     def _tangent_vec(self, phi: jnp.ndarray) -> jnp.ndarray:
         """Vector in the nullspace of jacobian"""
         J = self._jac_fn(phi)
@@ -51,10 +51,10 @@ class BaseStepper(ABC):
 
     def _projection(self, phi: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray, float]:
         """Projects composition back onto the coexistence manifold."""
-        E = self._residual_jit(phi)
+        res = self._residual_jit(phi)
 
         # Adaptive tolerance
-        tol = jnp.clip(jnp.linalg.norm(E) * 1e-3, 1e-12, 1e-6)
+        tol = jnp.clip(jnp.linalg.norm(res) * 1e-3, 1e-12, 1e-6)
 
         J = self._jac_fn(phi)
         U, S, Vt = self._svd_fn(J, full_matrices=False)
@@ -66,12 +66,15 @@ class BaseStepper(ABC):
 
         # Pseudoinverse from SVD: J^+ = V * diag(S_inv) * U^T
         J_pinv = (Vt.T * S_inv) @ U.T
-        return -J_pinv @ E, E, jnp.min(jnp.abs(S))
+        return -J_pinv @ res, res, jnp.min(jnp.abs(S))
 
-    def _proj_refine(
+    def _projection_loop(
         self, phi: jnp.ndarray
     ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
-        """Newton-style projection loop, capped at 100 iters."""
+        """
+        Newton-style projection loop, capped at 100 iters.
+        Returns: (projected_phi, final_residual_norm, final_sv, failed_flag)
+        """
 
         # Compute initial residual norm and sv from a *single* projection eval
         _, res_vec0, sv0 = self._projection(phi)
@@ -146,7 +149,7 @@ class BaseStepper(ABC):
             phi_pred = phi_new + delta * v_t
 
             # project back to manifold (capped loop)
-            phi_proj, res_norm, sv_new, proj_failed = self._proj_refine(phi_pred)
+            phi_proj, res_norm, sv_new, proj_failed = self._projection_loop(phi_pred)
 
             # NaN check
             nan_failed = jnp.any(jnp.isnan(phi_proj))
