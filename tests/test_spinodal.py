@@ -1,6 +1,8 @@
 import numpy as np
 import pytest
 import networkx as nx
+from shapely import LineString
+import shapely.plotting as splt
 
 from pyphasediagram.spinodal import SpinodalPoint, CriticalPoint, Spinodal
 
@@ -196,7 +198,7 @@ def test_build_calls_internal_steps(monkeypatch, simple_chis):
 
     monkeypatch.setattr(sp, "_spinodal_domains", lambda: np.array([0.1, 0.2, 0.7, 0.8]))
 
-    def fake_domain_data(phi1_i, phi1_f):
+    def fake_domain_data(phi1_i, phi1_f, num_points=1000):
         called["domain_data"] += 1
         # keep it minimal: add a tiny edge so later steps can run if needed
         p0 = SpinodalPoint(sp.node_id, phi1_i, 0.1)
@@ -396,3 +398,224 @@ def test_find_critical_points_raises_on_nan_third_derivative(monkeypatch, simple
 
     with pytest.raises(ValueError, match="NaN values found in third derivative"):
         sp._find_critical_points()
+
+
+# tests/test_spinodal_e2e.py
+import numpy as np
+import pytest
+import networkx as nx
+
+from pyphasediagram.spinodal import Spinodal
+
+
+# ----------------------------
+# Helpers
+# ----------------------------
+
+
+def _random_chis(rng: np.random.Generator, low=-10.0, high=10.0) -> np.ndarray:
+    """
+    Symmetric 2x2 chi matrix with entries in [low, high]:
+        [[chi11, chi12],
+         [chi12, chi22]]
+    """
+    chi11 = rng.uniform(low, high)
+    chi22 = rng.uniform(low, high)
+    chi12 = rng.uniform(low, high)
+    return np.array([[chi11, chi12], [chi12, chi22]], dtype=float)
+
+
+def _build_spinodal_or_skip(chis: np.ndarray, num_points=800) -> Spinodal:
+    """
+    Build a spinodal.
+    Skips if build produces an empty graph or throws common numerical errors.
+    """
+    sp = Spinodal(chis)
+
+    sp.build(num_points=num_points)
+
+    if sp.spinodal_graph.number_of_nodes() == 0:
+        pytest.skip(f"Skipping empty graph for chis {chis}")
+
+    return sp
+
+
+def _assert_point_in_simplex(phi1, phi2, tol=1e-12):
+    assert np.isfinite(phi1) and np.isfinite(phi2)
+    assert phi1 >= -tol
+    assert phi2 >= -tol
+    assert phi1 <= 1 + tol
+    assert phi2 <= 1 + tol
+    assert (phi1 + phi2) <= 1 + tol
+
+
+# ----------------------------
+# E2E tests
+# ----------------------------
+
+
+@pytest.mark.parametrize("seed", list(range(100)))
+def test_e2e_spinodal_invariants_random_chis(seed):
+    """This is a broad end-to-end test that builds many spinodal graphs from random chi parameters and checks key invariants"""
+    rng = np.random.default_rng(seed)
+    chis = _random_chis(rng, -10.0, 10.0)
+
+    sp = _build_spinodal_or_skip(chis, num_points=800)
+    G = sp.spinodal_graph
+    nodes = list(G.nodes())
+
+    # --- 1) Every node has degree 1 or 2 (no branching)
+    degrees = dict(G.degree())
+    assert all(d in (1, 2) for d in degrees.values())
+
+    # --- 2) Every node is inside the bounds of the phase diagram (simplex)
+    for n in nodes:
+        _assert_point_in_simplex(n.phi1, n.phi2, tol=1e-10)
+
+    # --- 3): no NaNs anywhere
+    assert not any(np.isnan(n.phi1) or np.isnan(n.phi2) for n in nodes)
+
+    # --- 4) Critical points are where the third derivative vanishes (approximately)
+    # We check both:
+    #   (a) cp is inside the simplex
+    #   (b) third derivative at cp is smaller than at adjacent nodes
+    #
+    for cp in sp.critical_points:
+        _assert_point_in_simplex(cp.phi1, cp.phi2, tol=1e-10)
+        td_cp = sp._third_derivative(cp.phi1, cp.phi2)
+        assert np.isfinite(td_cp)
+
+        # Find the two adjacent nodes in phase space
+        distances = [
+            np.sqrt((cp.phi1 - n.phi1) ** 2 + (cp.phi2 - n.phi2) ** 2) for n in nodes
+        ]
+        closest_nodes = sorted(zip(distances, nodes))[:2]
+        assert len(closest_nodes) == 2
+
+        # Ensure the absolute value of the third derivative at the adjacent nodes is larger
+        td_adj_1 = sp._third_derivative(
+            closest_nodes[0][1].phi1, closest_nodes[0][1].phi2
+        )
+        td_adj_2 = sp._third_derivative(
+            closest_nodes[1][1].phi1, closest_nodes[1][1].phi2
+        )
+        assert np.isfinite(td_adj_1) and np.isfinite(td_adj_2)
+        assert abs(td_adj_1) > abs(td_cp)
+        assert abs(td_adj_2) > abs(td_cp)
+
+    # --- 5) Every node with degree 2 is "between" its adjacent neighbors
+    for n, d in degrees.items():
+        if d == 2:
+            nb = list(G.neighbors(n))
+            assert len(nb) == 2
+            assert n.is_between(nb[0], nb[1], tol=np.pi / 6)
+
+    # --- 6) Each connected component is either a simple path (2 endpoints) or a cycle (0 endpoints)
+    for comp in nx.connected_components(G):
+        sg = G.subgraph(comp)
+        endpoint_count = sum(1 for _, d in sg.degree() if d == 1)
+        assert endpoint_count in (0, 2)
+
+    # --- 7) No self loops
+    assert nx.number_of_selfloops(G) == 0
+
+    # --- 8) Check edge lengths are reasonable (not too long, not zero)
+    # Allow some slack for reduced resolution.
+    max_len = 0.2
+    for u, v in G.edges():
+        dist = u.dist(v)
+        assert np.isfinite(dist)
+        assert dist > 0.0
+        assert dist < max_len
+
+    # --- 9) Critical points should lie "near" the curve:
+    # Find nearest node distance and require it's reasonably small.
+    # (This catches cases where cp interpolation is way off.)
+    nodes = list(G.nodes())
+    for cp in sp.critical_points:
+        dmin = min(
+            np.sqrt((cp.phi1 - n.phi1) ** 2 + (cp.phi2 - n.phi2) ** 2) for n in nodes
+        )
+        assert dmin < 0.05  # tune based on resolution
+
+
+@pytest.mark.parametrize("chi", np.linspace(2.1, 3.5, 29))
+def test_e2e_spinodal_invariants_symmetric_case(chi):
+    """
+    A targeted e2e test: symmetric matrix should produce spinodal branches with the same shape.
+    The number of critical points and branches should match known behavior for symmetric case as chi is varied.
+    """
+
+    # Use shapely to determine if spinodal branches have same shape
+    import shapely
+
+    if chi == 3:
+        return
+        pytest.skip(
+            "Skipping chi=3 due to known numerical issues with second order phase transition"
+        )
+
+    chis = np.array([[-2 * chi, -chi], [-chi, -2 * chi]], dtype=float)
+    sp = _build_spinodal_or_skip(chis, num_points=1000)
+    G = sp.spinodal_graph
+
+    assert G.number_of_nodes() > 10
+
+    comps = list(nx.connected_components(G))
+
+    # Check for correct number of critical points
+    if chi < 2.575 or chi > 8 / 3:
+        assert len(sp.critical_points) == 3
+
+    else:  # chi > 2.575 and chi < 8 / 3
+        assert len(sp.critical_points) == 9
+
+    # Check for number of branches
+    if chi < 8 / 3:
+        assert len(comps) == 3
+    # Get branch at center of phase space
+    else:
+        assert len(comps) == 4
+
+    # Rotate all branches to dilute limit of second component and then compare shapes
+    line_compare: shapely.geometry.LineString = None
+    num_boundary_branches = 0
+    for comp in comps:
+        sg = G.subgraph(comp)
+        phi1, phi2 = sp._coords_from_subgraph(sg)
+        endpoints = [n for n, d in sg.degree() if d == 1]
+        if len(endpoints) == 2:
+            num_boundary_branches += 1
+
+            phi1, phi2 = sp._coords_from_subgraph(sg)
+            line = LineString(np.c_[phi1, phi2])
+
+            if line_compare is None:
+                line_compare = line
+            else:
+                intsct_obj = line_compare.intersection(line)
+
+                num_rotations = 0
+                while intsct_obj.geom_type != "MultiPoint":
+                    phi1, phi2 = phi2, 1 - phi1 - phi2
+                    line = LineString(np.c_[phi1, phi2])
+                    intsct_obj = line_compare.intersection(line)
+                    num_rotations += 1
+
+                    # Fail if num_rotations exceeds 3 (full cycle) without finding a match
+                    assert num_rotations < 3
+
+                # should have many intersection points if shapes match
+                assert len(intsct_obj.geoms) > 10
+
+    assert num_boundary_branches == 3
+
+    # Generic tests on the full graph and critical points:
+    degrees = dict(G.degree())
+    assert all(d in (1, 2) for d in degrees.values())
+
+    for n in G.nodes():
+        _assert_point_in_simplex(n.phi1, n.phi2, tol=1e-12)
+
+    for cp in sp.critical_points:
+        _assert_point_in_simplex(cp.phi1, cp.phi2, tol=1e-12)

@@ -13,14 +13,14 @@ class Spinodal:
         self.node_id = 0
         self.critical_points = []
 
-    def build(self):
+    def build(self, num_points=5000):
         """
         Build the spinodal curve as a graph with nodes representing points (phi1, phi2) on the curve.
         Edges connect consecutive points along the curve. The graph is stored in self.spinodal_graph.
         """
         phi1_domains = self._spinodal_domains()
         for i in range(0, len(phi1_domains), 2):
-            self._domain_data(phi1_domains[i], phi1_domains[i + 1])
+            self._domain_data(phi1_domains[i], phi1_domains[i + 1], num_points)
         self._clip_to_domain()
         self._connect_branches()
         self._find_critical_points()
