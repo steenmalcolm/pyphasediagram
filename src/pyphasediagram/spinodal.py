@@ -111,44 +111,39 @@ class Spinodal:
 
     def _connect_branches(self):
         """Connect disjoint branches of the spinodal curve by adding edges between closest endpoints (degree 1 nodes) of different components if they are within a certain distance threshold"""
+
         # TODO: Check if minimum bounding squares of subgraphs overlap before computing pairwise distances to speed up for large graphs
         if self.spinodal_graph.number_of_nodes() == 0:
             return
+
         comps = list(nx.connected_components(self.spinodal_graph))
-        for compi in comps:
-            sub_graphi = self.spinodal_graph.subgraph(compi)
-            endpoints_i = [
-                pt for pt in sub_graphi.nodes() if sub_graphi.degree[pt] == 1
-            ]
-            closest_pt_list = [0] * len(endpoints_i)
-            closest_dist_list = [float("inf")] * len(endpoints_i)
+        n = len(comps)
 
-            for compj in comps:
-                sub_graphj = self.spinodal_graph.subgraph(compj)
-                endpoints_j = [
-                    pt for pt in sub_graphj.nodes() if sub_graphj.degree[pt] == 1
-                ]
-                for epi_idx, epi in enumerate(endpoints_i):
-                    for epj in endpoints_j:
-                        dist = epi.dist(epj)
-                        if dist < closest_dist_list[epi_idx] and epi != epj:
-                            # Check edge case epi and epj are only two points on spinodal branch
-                            nb_epi = next(self.spinodal_graph.neighbors(epi))
-                            if nb_epi == epj:
-                                continue
-                            closest_dist_list[epi_idx] = dist
-                            closest_pt_list[epi_idx] = epj
+        # Endpoints have degree 1
+        endpoints = [
+            pt
+            for pt in self.spinodal_graph.nodes()
+            if self.spinodal_graph.degree[pt] == 1
+        ]
+        # Keep track of endpoints we've already connected to avoid adding multiple edges from the same endpoint in cases where more than 2 branches are close together
+        invalid_endpoints = []
 
-            for epi_idx, epi in enumerate(endpoints_i):
-                if closest_dist_list[epi_idx] < 0.05:
-                    epj = closest_pt_list[epi_idx]
-                    # Make sure the two branches are pointing towards each other
-                    nb_epi = next(self.spinodal_graph.neighbors(epi))
-                    nb_epj = next(self.spinodal_graph.neighbors(epj))
-                    if epj.is_between(nb_epj, epi) and epi.is_between(nb_epi, epj):
-                        self.spinodal_graph.add_edge(epi, epj)
-                        # Call recursively because graph structure has changed
-                        return self._connect_branches()
+        for i, epti in enumerate(endpoints):
+            if epti in invalid_endpoints:
+                continue
+            for eptj in endpoints[i + 1 :]:
+                if eptj in invalid_endpoints:
+                    continue
+                dist = epti.dist(eptj)
+                # Note this is a greedy algorithm, might need elaborate testing to make sure it works
+                if dist < 0.05:
+                    nb_epti = next(self.spinodal_graph.neighbors(epti))
+                    nb_eptj = next(self.spinodal_graph.neighbors(eptj))
+                    if eptj.is_between(nb_eptj, epti) and epti.is_between(
+                        nb_epti, eptj
+                    ):
+                        self.spinodal_graph.add_edge(epti, eptj)
+                        invalid_endpoints.extend([epti, eptj])
 
     def _coords_from_subgraph(self, sg):
         """
