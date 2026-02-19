@@ -9,7 +9,7 @@ class TernaryStepper(BaseStepper):
     """Coexistence curve stepper for a ternary mixture."""
 
     def __init__(self, chis):
-        self.chis = chis  # (2,2)
+        self.chis = jnp.asarray(chis)  # (2,2)
         super().__init__()
 
     def residual(self, phi: jnp.ndarray) -> jnp.ndarray:
@@ -41,8 +41,8 @@ class TernaryStepper(BaseStepper):
     def binary_state(self, chi) -> float:
         """Find the binary coexistence point for the given Flory parameter."""
         # This is initialization (SciPy); it does not need to be jitted to run the main stepper loop.
-        if chi < 2:
-            print(f"Warning: Chi value {chi:.2f}<2 too low for phase separation")
+        if chi <= 2:
+            print(f"Warning: Chi value {chi:.2f}<=2 too low for phase separation")
             return None
 
         eq_func = lambda x: np.log(x / (1 - x)) + chi * (1 - 2 * x)
@@ -62,6 +62,8 @@ class TernaryStepper(BaseStepper):
             which_comp == 0
         ):  # Phase separation between components 1 and 2, component 0 is dilute
             chi = self.chis[0, 1] - 0.5 * (self.chis[0, 0] + self.chis[1, 1])
+            if chi <= 2:
+                return None, None
             phi_bin = self.binary_state(chi)
             phi_init = np.array([phi_bin, 1 - phi_bin, 1 - phi_bin, phi_bin]) - 1e-4
             v_init = np.array([-1, -1, -1, -1])
@@ -69,6 +71,8 @@ class TernaryStepper(BaseStepper):
         # Phase separation between components 0 and 2, component 1 is dilute
         elif which_comp == 1:
             chi = -0.5 * self.chis[1, 1]
+            if chi <= 2:
+                return None, None
             phi_bin = self.binary_state(chi)
             phi_init = np.array([phi_bin, 1 - phi_bin, 1 - phi_bin, phi_bin]) - 1e-4
             phi_init[0] = 1 - phi_init[0] - phi_init[1]
@@ -78,6 +82,8 @@ class TernaryStepper(BaseStepper):
         # Phase separation between components 0 and 1, component 2 is dilute
         elif which_comp == 2:
             chi = -0.5 * self.chis[0, 0]
+            if chi <= 2:
+                return None, None
             phi_bin = self.binary_state(chi)
             phi_init = np.array([phi_bin, 1 - phi_bin, 1 - phi_bin, phi_bin]) - 1e-4
             phi_init[1] = 1 - phi_init[0] - phi_init[1]
