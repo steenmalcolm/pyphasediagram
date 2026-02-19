@@ -52,6 +52,14 @@ class Point:
         cos_angle = np.dot(self_to_1, self_to_2)
         return cos_angle < np.cos(np.pi - tol)
 
+    def is_close_to(self, pt, tol=1e-3):
+        """Determine if this point is close to another point by checking if the distance between them is less than a specified tolerance."""
+        if not isinstance(pt, Point):
+            raise NotImplementedError(
+                "is_close_to can only be computed between Point instances."
+            )
+        return self.dist(pt) < tol
+
     def __iter__(self):
         yield self.phi1
         yield self.phi2
@@ -84,6 +92,19 @@ class CriticalPoint(Point):
 
         return cls(idx, phi1, phi2, dphi1, dphi2)
 
+    def get_phi_and_v_init(self):
+
+        phi_init = np.array(
+            [
+                self.phi1 + self.dphi1 * 1e-3,
+                self.phi2 + self.dphi2 * 1e-3,
+                self.phi1 - self.dphi1 * 1e-3,
+                self.phi2 - self.dphi2 * 1e-3,
+            ]
+        )
+        v_init = np.array([self.dphi1, self.dphi2, -self.dphi1, -self.dphi2])
+        return phi_init, v_init
+
     def plot(self, s=10, **kwargs):
         """Convenience method to plot this critical point with a different marker and color than regular SpinodalPoints. By default, the marker is a yellow star."""
         if "marker" not in kwargs:
@@ -106,6 +127,10 @@ class BinodalPoint:
         self.ptb = Point(1, phi1b, phi2b)
         self.sv = sv
 
+    def from_points(pt1: Point, pt2: Point, sv: float):
+        """Create a BinodalPoint from two Points representing the compositions of the two coexisting phases and a scalar value sv representing the spinodal value at this binodal point. The coordinates of the two points are used to initialize the two phases of the binodal point."""
+        return BinodalPoint(pt1.phi1, pt1.phi2, pt2.phi1, pt2.phi2, sv)
+
     def __repr__(self):
         return f"BinodalPoint(phi_a=({self.pta.phi1:.4f}, {self.pta.phi2:.4f}), phi_b=({self.ptb.phi1:.4f}, {self.ptb.phi2:.4f}, sv={self.sv:.2e}))"
 
@@ -116,13 +141,25 @@ class BinodalPoint:
     def to_numpy(self):
         return np.array([self.pta.phi1, self.pta.phi2, self.ptb.phi1, self.ptb.phi2])
 
+    def plot(self, s=20, **kwargs):
+        """Convenience method to plot this binodal point by plotting the two coexisting phases with different markers and colors. By default, the first phase is plotted as a blue circle and the second phase is plotted as an orange square."""
+        color = kwargs.get("color", "purple")
+        marker = kwargs.get("marker", "o")
+        edgecolor = kwargs.get("edgecolor", "black")
+        self.pta.plot(s=s, color=color, marker=marker, edgecolor=edgecolor)
+        self.ptb.plot(s=s, color=color, marker=marker, edgecolor=edgecolor)
 
-if __name__ == "__main__":
-    # Test if I can add two spinodal point instances and get a numpy array back
-    pt1 = SpinodalPoint(0, 0.2, 0.3)
-    pt2 = SpinodalPoint(1, 0.4, 0.5)
-    pt_sum = pt1 + pt2
-    print(pt_sum)  # Should print a numpy array with the sum of the coordinates
-    # Test if I can get the distance between two spinodal point instances
-    dist = pt1.dist(pt2)
-    print(dist)  # Should print the Euclidean distance between pt1 and pt2
+    def is_similar_to(self, bpt, tol=1e-3):
+        """Determine if this binodal point is similar to another binodal point by checking if the compositions of the two coexisting phases are close to each other within a specified tolerance."""
+        if not isinstance(bpt, BinodalPoint):
+            raise NotImplementedError(
+                "is_similar_to can only be computed between BinodalPoint instances."
+            )
+        pta, ptb = self.pta, self.ptb
+        for permutation in range(2):
+            pta, ptb = ptb, pta
+            if pta.is_close_to(bpt.pta, tol) and ptb.is_close_to(bpt.ptb, tol):
+                return True
+
+        return False
+
