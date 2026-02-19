@@ -217,12 +217,13 @@ class Spinodal:
                     CriticalPoint(-1, phi1_c, phi2_c, dphi1, dphi2)
                 )
 
-    def plot(self):
+    def plot(self, **kwargs):
         a, b, c = self.chis[0, 0], self.chis[1, 1], self.chis[0, 1]
         plt.figure()
         plt.title(
             r"$(\chi_{11}, \chi_{22}, \chi_{12})$ = " + f"({a:.5f}, {b:.5f}, {c:.5f})"
         )
+        ls = kwargs.get("linestyle", "--")
         for i, comp in enumerate(nx.connected_components(self.spinodal_graph)):
             sg = self.spinodal_graph.subgraph(comp)
 
@@ -231,9 +232,9 @@ class Spinodal:
             if np.isnan(phi2s).any():
                 print("NaN values found in ys, skipping plot for this component.")
             if i == 0:
-                plt.plot(phi1s, phi2s, label="Spinodal curve")
+                plt.plot(phi1s, phi2s, label="Spinodal curve", linestyle=ls)
             else:
-                plt.plot(phi1s, phi2s)
+                plt.plot(phi1s, phi2s, linestyle=ls)
 
         for i, crit_pt in enumerate(self.critical_points):
             if i == 0:
