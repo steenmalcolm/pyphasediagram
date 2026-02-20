@@ -4,7 +4,6 @@ import pytest
 import jax
 import jax.numpy as jnp
 
-# Import your BaseStepper from your package
 from pyphasediagram.stepper.base import BaseStepper
 
 # TODO: Add End-to-end tests that build a full graph and check for expected properties such as geometry and orientation of critical point
@@ -26,7 +25,12 @@ def phi():
     Shape is (4,) = (phi1_a, phi2_a, phi1_b, phi2_b).
     """
     # Ensure both phases have sum < 1 so phi0_phase = 1 - sum > 0
-    return jnp.array([0.20, 0.30, 0.25, 0.35], dtype=jnp.float64)
+    return np.array([0.20, 0.30, 0.25, 0.35], dtype=jnp.float64)
+
+
+@pytest.fixture()
+def v_init():
+    return np.array([1.0, 0.0, 1.0, 0.0], dtype=jnp.float64)
 
 
 class DummyTernaryStepper(BaseStepper):
@@ -55,7 +59,7 @@ class DummyTernaryStepper(BaseStepper):
         return jnp.hstack((mu_diff, pi_diff))  # (3,)
 
     def is_terminate(self, phi: jnp.ndarray) -> jnp.ndarray:
-        """Stop when phases become too similar or invalid composition (JAX-traceable)."""
+        """Stop when phases become too similar or invalid composition."""
         close = jnp.linalg.norm(phi[2:] - phi[:2]) < 1e-3
         invalid = jnp.logical_or(jnp.any(phi < 0.0), (phi[0] + phi[1]) > 1.0)
         invalid = jnp.logical_or(invalid, (phi[2] + phi[3]) > 1.0)
@@ -142,9 +146,7 @@ def test_run_executes_and_returns_shapes(stepper, phi):
     # Use a float v_init to avoid dtype issues in lax.select
     v_init = jnp.array([1.0, 0.0, 1.0, 0.0], dtype=phi.dtype)
 
-    phis, svs, flags = stepper.run(
-        np.asarray(phi), np.asarray(v_init), delta_0=2e-4, delta_1=1e-3
-    )
+    phis, svs, flags = stepper.run(phi, np.asarray(v_init), delta_0=2e-4, delta_1=1e-3)
 
     assert isinstance(phis, np.ndarray)
     assert isinstance(svs, np.ndarray)
@@ -163,12 +165,181 @@ def test_run_points_are_valid_compositions(stepper, phi):
     - sum of independent comps per phase <= 1
     """
     v_init = jnp.array([1.0, 0.0, 1.0, 0.0], dtype=phi.dtype)
-    phis, svs, flags = stepper.run(
-        np.asarray(phi), np.asarray(v_init), delta_0=2e-4, delta_1=1e-3
-    )
+    phis, svs, flags = stepper.run(phi, v_init, delta_0=2e-4, delta_1=1e-3)
 
     # phis is (2 phases, 2 comps, K)
     assert np.all(np.isfinite(phis))
     assert np.all(phis >= -1e-12)  # allow tiny numerical undershoot
     sums = phis.sum(axis=1)  # (2, K)
     assert np.all(sums <= 1.0 + 1e-10)
+
+
+########################################
+# Flag tests
+########################################
+
+
+class FlagStepperBase(BaseStepper):
+    """
+    A deterministic BaseStepper for testing run() flag decoding.
+
+    We override _projection/_projection_loop/_tangent_vec so we can:
+      - avoid depending on jacobian/SVD numerics
+      - deterministically trigger status bits
+      - keep JIT-compatibility (all control flow stays in JAX)
+    """
+
+    MAX_STEPS = 12  # keep tests fast
+
+    def __init__(self):
+        super().__init__()
+
+    def residual(self, phi: jnp.ndarray) -> jnp.ndarray:
+        # Not used, but required.
+        return jnp.zeros((3,), dtype=phi.dtype)
+
+    def is_terminate(self, phi: jnp.ndarray) -> jnp.ndarray:
+        # Default: never terminate (tests can override).
+        return jnp.array(False)
+
+    def _projection(self, phi: jnp.ndarray):
+        # Return a harmless "projection" result so _run_impl can initialize sv0.
+        v_n = jnp.zeros_like(phi)
+        res = (
+            jnp.zeros((3,), dtype=phi.dtype) + 1e-12
+        )  # Projection will fail if exactly 0
+        svmin = jnp.array(1.0, dtype=phi.dtype)
+        return v_n, res, svmin
+
+    def _projection_loop(self, phi: jnp.ndarray):
+        # Default: no-op projection, never fails.
+        phi_f = phi
+        res_f = jnp.array(0.0, dtype=phi.dtype)
+        sv_f = jnp.array(1.0, dtype=phi.dtype)
+        failed = jnp.array(False)
+        return phi_f, res_f, sv_f, failed
+
+    def _tangent_vec(self, phi: jnp.ndarray) -> jnp.ndarray:
+        # tangent step has no effect
+        return jnp.array([0.0, 0.0, 0.0, 0.0], dtype=phi.dtype)
+
+
+def test_run_sets_max_steps_flag(phi, v_init):
+    class MaxStepsStepper(FlagStepperBase):
+        # ensure cycle check can't stop us before MAX_STEPS
+        CYCLE_MIN_STEPS = 10_000
+
+        def is_terminate(self, phi):
+            return jnp.array(False)
+
+    stepper = MaxStepsStepper()
+    phis, _, flags = stepper.run(phi, v_init, delta_0=1e-3, delta_1=1e-3)
+
+    assert "MAX_STEPS" in flags
+    assert phis.shape[-1] == stepper.MAX_STEPS + 1
+
+
+def test_run_sets_cycled_flag(phi, v_init):
+    class CycledStepper(FlagStepperBase):
+
+        CYCLE_MIN_STEPS = 3  # Decrease to trigger cycle faster
+        CYCLE_INIT_TOL = 1e-12  # require exact return
+
+        def __init__(self, phi0):
+            self._phi0 = jnp.asarray(phi0)
+            super().__init__()
+
+        def _projection_loop(self, phi):
+            # Force the projection to always return exactly the initial point.
+            # Then dist(phi - phi0) == 0, so CYCLED triggers once step>=CYCLE_MIN_STEPS.
+            phi_f = self._phi0
+            res_f = jnp.array(0.0, dtype=phi.dtype)
+            sv_f = jnp.array(1.0, dtype=phi.dtype)
+            failed = jnp.array(False)
+            return phi_f, res_f, sv_f, failed
+
+        def is_terminate(self, phi):
+            return jnp.array(False)
+
+    stepper = CycledStepper(phi)
+    phis, _, flags = stepper.run(phi, v_init, delta_0=1e-3, delta_1=1e-3)
+    phis_T = np.transpose(phis, (2, 0, 1)).reshape(-1, 4)
+
+    assert "CYCLED" in flags
+    assert (np.linalg.norm(phis_T - phi, axis=1) < stepper.CYCLE_INIT_TOL).any()
+
+
+def test_run_sets_projection_fail_flag(phi, v_init):
+    class ProjectionFailStepper(FlagStepperBase):
+        CYCLE_MIN_STEPS = 10_000  # don't let cycle interfere
+
+        def _projection_loop(self, phi):
+            # Always report projection failure.
+            phi_f = phi
+            res_f = jnp.array(0.0, dtype=phi.dtype)
+            sv_f = jnp.array(1.0, dtype=phi.dtype)
+            failed = jnp.array(True)
+            return phi_f, res_f, sv_f, failed
+
+    stepper = ProjectionFailStepper()
+    phis, _, flags = stepper.run(phi, v_init, delta_0=1e-3, delta_1=1e-3)
+
+    assert "PROJECTION_FAIL" in flags
+
+
+def test_run_sets_nan_flag(phi, v_init):
+    class NanStepper(FlagStepperBase):
+        CYCLE_MIN_STEPS = 10_000  # don't let cycle interfere
+
+        def _projection_loop(self, phi):
+            # Inject a NaN into the projected phi.
+            phi_f = phi.at[0].set(jnp.nan)
+            res_f = jnp.array(0.0, dtype=phi.dtype)
+            sv_f = jnp.array(1.0, dtype=phi.dtype)
+            failed = jnp.array(False)
+            return phi_f, res_f, sv_f, failed
+
+    stepper = NanStepper()
+    phis, _, flags = stepper.run(phi, v_init, delta_0=1e-3, delta_1=1e-3)
+
+    assert "NAN" in flags
+    assert np.isnan(phis).any()
+
+
+def test_run_sets_angle_fail_flag(phi, v_init):
+    class AngleFailStepper(FlagStepperBase):
+        CYCLE_MIN_STEPS = 10_000  # don't let cycle interfere
+
+        def __init__(self, phi0):
+            self._phi0 = jnp.asarray(phi0)
+            super().__init__()
+
+        def _projection_loop(self, phi):
+            # We want:
+            # - step 0 (trace start): move along e0
+            # - step 1: move along e1 (orthogonal to previous step direction) -> ANGLE_FAIL
+            #
+            # We can distinguish the first call by checking whether we're still at phi0.
+            dist = jnp.linalg.norm(phi - self._phi0)
+            e0 = jnp.array([1.0, 0.0, 0.0, 0.0], dtype=phi.dtype)
+            e1 = jnp.array([0.0, 1.0, 0.0, 0.0], dtype=phi.dtype)
+
+            # If we're basically at the start, return phi0 + small e0.
+            # Otherwise return current + small e1 (orthogonal to the previous movement).
+            phi_f = jnp.where(
+                dist < 1e-12,
+                self._phi0 + 1e-3 * e0,
+                phi + 1e-3 * e1,
+            )
+            res_f = jnp.array(0.0, dtype=phi.dtype)
+            sv_f = jnp.array(1.0, dtype=phi.dtype)
+            failed = jnp.array(False)
+            return phi_f, res_f, sv_f, failed
+
+        def is_terminate(self, phi):
+            return phi[1] > self._phi0[1]
+
+    stepper = AngleFailStepper(phi)
+    phis, _, flags = stepper.run(phi, v_init, delta_0=1e-3, delta_1=1e-3)
+
+    assert "ANGLE_FAIL" in flags
