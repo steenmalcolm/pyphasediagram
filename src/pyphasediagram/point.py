@@ -120,23 +120,16 @@ class CriticalPoint(Point):
 
 
 class BinodalPoint:
-    def __init__(
-        self, phi1a: float, phi2a: float, phi1b: float, phi2b: float, sv: float
-    ):
+    def __init__(self, phi1a: float, phi2a: float, phi1b: float, phi2b: float):
         self.pta = Point(0, phi1a, phi2a)
         self.ptb = Point(1, phi1b, phi2b)
-        self.sv = sv
 
     def from_points(pt1: Point, pt2: Point, sv: float):
         """Create a BinodalPoint from two Points representing the compositions of the two coexisting phases and a scalar value sv representing the spinodal value at this binodal point. The coordinates of the two points are used to initialize the two phases of the binodal point."""
         return BinodalPoint(pt1.phi1, pt1.phi2, pt2.phi1, pt2.phi2, sv)
 
     def __repr__(self):
-        return f"BinodalPoint(phi_a=({self.pta.phi1:.4f}, {self.pta.phi2:.4f}), phi_b=({self.ptb.phi1:.4f}, {self.ptb.phi2:.4f}, sv={self.sv:.2e}))"
-
-    def __iter__(self):
-        yield from self.pta
-        yield from self.ptb
+        return f"BinodalPoint(phi_a=({self.pta.phi1:.4f}, {self.pta.phi2:.4f}), phi_b=({self.ptb.phi1:.4f}, {self.ptb.phi2:.4f}))"
 
     def to_numpy(self):
         return np.array([self.pta.phi1, self.pta.phi2, self.ptb.phi1, self.ptb.phi2])
@@ -149,17 +142,67 @@ class BinodalPoint:
         self.pta.plot(s=s, color=color, marker=marker, edgecolor=edgecolor)
         self.ptb.plot(s=s, color=color, marker=marker, edgecolor=edgecolor)
 
-    def is_similar_to(self, bpt, tol=1e-3):
-        """Determine if this binodal point is similar to another binodal point by checking if the compositions of the two coexisting phases are close to each other within a specified tolerance."""
-        if not isinstance(bpt, BinodalPoint):
-            raise NotImplementedError(
-                "is_similar_to can only be computed between BinodalPoint instances."
-            )
+
+class BinodalInitialPoint(BinodalPoint):
+    def __init__(self, phi_init: np.ndarray, v_init: np.ndarray):
+        super().__init__(*phi_init)
+        self.phi_init = phi_init
+        self.v_init = v_init / np.linalg.norm(v_init)
+
+    def is_similar_to(self, bipt, dist_tol=1e-3, angle_tol=np.pi / 8):
+        """
+        Determine if this BinodalInitialPoint is similar to another BinodalInitialPoint by
+        checking if the compositions of the two points are close within a distance tolerance
+        and if the direction vectors are aligned within an angle tolerance.
+        """
+
+        is_similar = False
         pta, ptb = self.pta, self.ptb
+        v_init = self.v_init.copy()
+
         for permutation in range(2):
             pta, ptb = ptb, pta
-            if pta.is_close_to(bpt.pta, tol) and ptb.is_close_to(bpt.ptb, tol):
+            v_init = v_init[[2, 3, 0, 1]]
+            # Distance proximity check
+            is_similar = pta.is_close_to(bipt.pta, dist_tol) and ptb.is_close_to(
+                bipt.ptb, dist_tol
+            )
+            # Angle proximity check
+            is_similar = is_similar and abs(np.dot(v_init, bipt.v_init)) > np.cos(
+                angle_tol
+            )
+            if is_similar:
                 return True
 
         return False
 
+    def plot(self, **kwargs):
+        super().plot(**kwargs)
+        v = self.v_init * 1e-3
+        plt.arrow(
+            self.pta.phi1,
+            self.pta.phi2,
+            v[0],
+            v[1],
+            head_width=0.002,
+            head_length=0.02,
+            fc="red",
+            ec="red",
+        )
+        plt.arrow(
+            self.ptb.phi1,
+            self.ptb.phi2,
+            v[2],
+            v[3],
+            head_width=0.002,
+            head_length=0.02,
+            fc="red",
+            ec="red",
+        )
+
+    def __repr__(self):
+        return f"BinodalInitialPoint(phi_a=({self.pta.phi1:.4f}, {self.pta.phi2:.4f}), phi_b=({self.ptb.phi1:.4f}, {self.ptb.phi2:.4f}), v_init={self.v_init})"
+
+    def __iter__(self):
+        yield self.phi_init
+        yield self.v_init
