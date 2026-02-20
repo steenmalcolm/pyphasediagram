@@ -17,7 +17,7 @@ class BaseStepper(ABC):
     MAX_STEPS = 1e5
 
     # --- cycle termination knobs ---
-    CYCLE_MIN_STEPS = 10 # don't trigger immediately
+    CYCLE_MIN_STEPS = 10  # don't trigger immediately
     CYCLE_INIT_TOL = 1e-3  # "back at start" tolerance
 
     def __init__(self):
@@ -301,12 +301,12 @@ class BaseStepper(ABC):
     ):
         """Executes the stepping procedure and returns the coexistance curve"""
         max_steps = int(self.MAX_STEPS)
-        phi_init = jnp.asarray(phi_init)
-        v_init = jnp.asarray(v_init, dtype=phi_init.dtype)
+        phi_jnp = jnp.asarray(phi_init)
+        v_jnp = jnp.asarray(v_init, dtype=phi_init.dtype)
 
         phi_hist, sv_hist, stepf, statusf = self._run_jit(
-            phi_init,
-            v_init,
+            phi_jnp,
+            v_jnp,
             float(delta_0),
             float(delta_1),
             max_steps=max_steps,
