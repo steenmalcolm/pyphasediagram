@@ -142,7 +142,7 @@ def test_run_executes_and_returns_shapes(stepper, phi):
     # Use a float v_init to avoid dtype issues in lax.select
     v_init = jnp.array([1.0, 0.0, 1.0, 0.0], dtype=phi.dtype)
 
-    phis, svs = stepper.run(
+    phis, svs, flags = stepper.run(
         np.asarray(phi), np.asarray(v_init), delta_0=2e-4, delta_1=1e-3
     )
 
@@ -163,7 +163,7 @@ def test_run_points_are_valid_compositions(stepper, phi):
     - sum of independent comps per phase <= 1
     """
     v_init = jnp.array([1.0, 0.0, 1.0, 0.0], dtype=phi.dtype)
-    phis, svs = stepper.run(
+    phis, svs, flags = stepper.run(
         np.asarray(phi), np.asarray(v_init), delta_0=2e-4, delta_1=1e-3
     )
 

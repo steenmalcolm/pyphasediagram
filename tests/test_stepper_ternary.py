@@ -119,7 +119,7 @@ def test_run_executes_from_binary_init(stepper):
     phi_init, v_init = stepper.binary_init(0)
     assert phi_init is not None and v_init is not None
 
-    phis, svs = stepper.run(
+    phis, svs, flags = stepper.run(
         np.asarray(phi_init), np.asarray(v_init), delta_0=2e-4, delta_1=1e-3
     )
 
@@ -146,7 +146,7 @@ def test_run_points_are_near_manifold(stepper):
     Keep it light: only check first few points.
     """
     phi_init, v_init = stepper.binary_init(0)
-    phis, _ = stepper.run(
+    phis, _, flags = stepper.run(
         np.asarray(phi_init), np.asarray(v_init), delta_0=2e-4, delta_1=1e-3
     )
 
