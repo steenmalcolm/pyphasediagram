@@ -16,6 +16,10 @@ class BaseStepper(ABC):
 
     MAX_STEPS = 1e5
 
+    # --- cycle termination knobs ---
+    CYCLE_MIN_STEPS = 10 # don't trigger immediately
+    CYCLE_INIT_TOL = 1e-3  # "back at start" tolerance
+
     def __init__(self):
         # JIT all computational kernels
         self._residual_jit = jax.jit(self.residual)
@@ -67,6 +71,29 @@ class BaseStepper(ABC):
         # Pseudoinverse from SVD: J^+ = V * diag(S_inv) * U^T
         J_pinv = (Vt.T * S_inv) @ U.T
         return -J_pinv @ res, res, jnp.min(jnp.abs(S))
+
+    def _hit_initial_cycle(
+        self, step: jnp.ndarray, phi: jnp.ndarray, phi_hist: jnp.ndarray
+    ):
+        phi0 = phi_hist[0]
+        dist0 = jnp.linalg.norm(phi - phi0)
+        return jnp.logical_and(
+            step >= self.CYCLE_MIN_STEPS, dist0 < self.CYCLE_INIT_TOL
+        )
+
+    def _decode_status(self, status):
+        flags = []
+        if status & 1:
+            flags.append("MAX_STEPS")
+        if status & 2:
+            flags.append("PROJECTION_FAIL")
+        if status & 4:
+            flags.append("NAN")
+        if status & 8:
+            flags.append("ANGLE_FAIL")
+        if status & 16:
+            flags.append("CYCLED")
+        return flags
 
     def _projection_loop(
         self, phi: jnp.ndarray
@@ -190,6 +217,11 @@ class BaseStepper(ABC):
         active2 = jnp.logical_and(active, jnp.logical_not(hit_max))
         status2 = jax.lax.select(hit_max, status2 | jnp.int32(1 << 0), status2)
 
+        # Cycle check
+        cycled = self._hit_initial_cycle(step2, phi2, phi_hist2)
+        active2 = jnp.logical_and(active2, jnp.logical_not(cycled))
+        status2 = jax.lax.select(cycled, status2 | jnp.int32(1 << 4), status2)
+
         return step2, active2, phi2, sv2, phi_hist2, sv_hist2, status2
 
     def _loop_cond(self, carry):
@@ -243,6 +275,7 @@ class BaseStepper(ABC):
         # 1: projection did not converge within 100 iters
         # 2: NaN encountered
         # 3: large deviation angle check triggered
+        # 4: cycled back to initial point
         status0 = jnp.array(0, dtype=jnp.int32)
 
         step0 = jnp.array(0, dtype=jnp.int32)
@@ -279,7 +312,9 @@ class BaseStepper(ABC):
             max_steps=max_steps,
         )
 
-        # truncate on host (stepf is a scalar)
+        flags = self._decode_status(statusf)
+
+        # remove empty preallocated tail from history buffers
         k = int(np.asarray(stepf))
         phi_hist = np.asarray(phi_hist)[: k + 1]
         svs = np.asarray(sv_hist)[: k + 1]
@@ -287,4 +322,4 @@ class BaseStepper(ABC):
         n = phi_hist.shape[1]
         phis = np.transpose(phi_hist.reshape(-1, 2, n // 2), axes=(1, 2, 0))
 
-        return phis, svs
+        return phis, svs, flags
