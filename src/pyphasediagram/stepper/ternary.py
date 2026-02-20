@@ -117,7 +117,7 @@ class TernaryStepper(BaseStepper):
                 raise RuntimeError("In binary_init: Projection not converging")
             iteration += 1
 
-        return jnp.asarray(phi_init), jnp.asarray(v_init)
+        return np.asarray(phi_init), np.asarray(v_init)
 
 
 if __name__ == "__main__":
