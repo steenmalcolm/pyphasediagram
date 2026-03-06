@@ -7,6 +7,13 @@ import jax.numpy as jnp
 # Always use float64 with jax
 jax.config.update("jax_enable_x64", True)
 
+# Status flag constants for error reporting
+STATUS_MAX_STEPS = jnp.int32(1 << 0)  # Hit maximum number of steps
+STATUS_PROJ_FAILED = jnp.int32(1 << 1)  # Projection failed to converge
+STATUS_NAN = jnp.int32(1 << 2)  # NaN encountered
+STATUS_ANGLE_FAILED = jnp.int32(1 << 3)  # Angle deviation check failed
+STATUS_CYCLED = jnp.int32(1 << 4)  # Cycled back to initial point
+
 
 class BaseStepper(ABC):
     """
@@ -190,9 +197,9 @@ class BaseStepper(ABC):
             )
 
             # Update status flags
-            status = jax.lax.select(proj_failed, status | jnp.int32(1 << 1), status)
-            status = jax.lax.select(nan_failed, status | jnp.int32(1 << 2), status)
-            status = jax.lax.select(angle_failed, status | jnp.int32(1 << 3), status)
+            status = jax.lax.select(proj_failed, status | STATUS_PROJ_FAILED, status)
+            status = jax.lax.select(nan_failed, status | STATUS_NAN, status)
+            status = jax.lax.select(angle_failed, status | STATUS_ANGLE_FAILED, status)
 
             # commit new point
             step_next = step + 1
@@ -215,12 +222,12 @@ class BaseStepper(ABC):
         # Enforce max_steps
         hit_max = step2 >= max_steps
         active2 = jnp.logical_and(active, jnp.logical_not(hit_max))
-        status2 = jax.lax.select(hit_max, status2 | jnp.int32(1 << 0), status2)
+        status2 = jax.lax.select(hit_max, status2 | STATUS_MAX_STEPS, status2)
 
         # Cycle check
         cycled = self._hit_initial_cycle(step2, phi2, phi_hist2)
         active2 = jnp.logical_and(active2, jnp.logical_not(cycled))
-        status2 = jax.lax.select(cycled, status2 | jnp.int32(1 << 4), status2)
+        status2 = jax.lax.select(cycled, status2 | STATUS_CYCLED, status2)
 
         return step2, active2, phi2, sv2, phi_hist2, sv_hist2, status2
 
