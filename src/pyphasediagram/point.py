@@ -124,9 +124,10 @@ class BinodalPoint:
         self.pta = Point(0, phi1a, phi2a)
         self.ptb = Point(1, phi1b, phi2b)
 
-    def from_points(pt1: Point, pt2: Point, sv: float):
+    @classmethod
+    def from_points(cls, pt1: Point, pt2: Point, sv: float):
         """Create a BinodalPoint from two Points representing the compositions of the two coexisting phases and a scalar value sv representing the spinodal value at this binodal point. The coordinates of the two points are used to initialize the two phases of the binodal point."""
-        return BinodalPoint(pt1.phi1, pt1.phi2, pt2.phi1, pt2.phi2, sv)
+        return cls(pt1.phi1, pt1.phi2, pt2.phi1, pt2.phi2, sv)
 
     def __repr__(self):
         return f"BinodalPoint(phi_a=({self.pta.phi1:.4f}, {self.pta.phi2:.4f}), phi_b=({self.ptb.phi1:.4f}, {self.ptb.phi2:.4f}))"
