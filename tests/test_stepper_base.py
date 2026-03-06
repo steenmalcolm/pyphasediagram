@@ -33,7 +33,7 @@ def v_init():
     return np.array([1.0, 0.0, 1.0, 0.0], dtype=jnp.float64)
 
 
-class DummyTernaryStepper(BaseStepper):
+class DummyStepper(BaseStepper):
     """Minimal concrete stepper for unit testing BaseStepper internals."""
 
     MAX_STEPS = 25  # keep tests fast
@@ -45,7 +45,7 @@ class DummyTernaryStepper(BaseStepper):
     def residual(self, phi: jnp.ndarray) -> jnp.ndarray:
         """
         Return chemical potential and osmotic pressure differences between phases.
-        This mirrors the TernaryStepper residual structure.
+        This mirrors the Stepper residual structure.
         """
         phis_phase = phi.reshape(2, -1)  # (2, 2)
         phi0_phase = 1.0 - phis_phase.sum(axis=1)  # (2,)
@@ -68,7 +68,7 @@ class DummyTernaryStepper(BaseStepper):
 
 @pytest.fixture()
 def stepper(chis):
-    return DummyTernaryStepper(chis)
+    return DummyStepper(chis)
 
 
 def test_residual_shape_and_finite(stepper, phi):

@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 import jax.numpy as jnp
 
-from pyphasediagram.stepper.ternary import TernaryStepper
+from pyphasediagram.stepper.flory import Stepper
 
 # TODO: unit test where _projection_loop WILL fail
 
@@ -27,7 +27,7 @@ def phi():
 
 @pytest.fixture()
 def stepper(chis):
-    obj = TernaryStepper(chis)
+    obj = Stepper(chis)
     # keep tests fast
     obj.MAX_STEPS = 50
     return obj

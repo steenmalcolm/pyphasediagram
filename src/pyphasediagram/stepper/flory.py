@@ -5,7 +5,7 @@ from scipy.optimize import root
 from pyphasediagram.stepper.base import BaseStepper
 
 
-class TernaryStepper(BaseStepper):
+class Stepper(BaseStepper):
     """Coexistence curve stepper for a ternary mixture."""
 
     def __init__(self, chis):
@@ -140,7 +140,7 @@ if __name__ == "__main__":
         # sp.build()
         # sp.plot()
         n_start = time.perf_counter()
-        obj = TernaryStepper(chis)
+        obj = Stepper(chis)
         for j in range(3):
             phi_init, v_init = obj.binary_init(j)
             if phi_init == None:

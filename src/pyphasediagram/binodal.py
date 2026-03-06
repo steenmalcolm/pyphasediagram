@@ -3,7 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import shapely
 from pyphasediagram.point import CriticalPoint, BinodalInitialPoint
-from pyphasediagram.stepper import TernaryStepper
+from pyphasediagram.stepper import Stepper
 
 
 class BinodalBranch:
@@ -57,12 +57,14 @@ class BinodalBranch:
                     return True
         return False
 
-    def _degenerate_points(self) -> list[BinodalInitialPoint]:
+    def _degenerate_points(
+        self, sv_branch_threshold: float = 1e-2
+    ) -> list[BinodalInitialPoint]:
         """Identify points where the null space of the Jacobian has dimension greater than 1, which indicates branching"""
         degenerate_points = []
         extrema_idx = np.where(np.diff(np.sign(np.diff(self.svs))) == 2)[0] + 1
         for idx in extrema_idx:
-            if self.svs[idx] < 1e-4:
+            if self.svs[idx] < sv_branch_threshold:
                 phi_init = self.phis[:, :, idx].flatten()
                 v_init = (
                     self.phis[:, :, idx + 1].flatten()
@@ -77,12 +79,14 @@ class BinodalBranch:
 
 class Binodal:
 
+    SV_BRANCH_THRESHOLD = 1e-2
+
     def __init__(self, chis: np.ndarray, critical_points: list[CriticalPoint] = []):
         """Initialize the Binodal class with a 2x2 matrix of chi parameters"""
         self.chis = chis
         self.critical_points = critical_points
         self.binodal_branches: list[BinodalBranch] = []
-        self._tracer = TernaryStepper(chis)
+        self._tracer = Stepper(chis)
         self._bipt_hist: list[BinodalInitialPoint] = []
 
     def _build_branch(self, phi_init, v_init):
@@ -126,24 +130,27 @@ class Binodal:
 
         # TODO: Keep iterating until all branching points have been explored, but for now just do one pass
         for bpt in self._find_branching_points():
-            is_unique_start = True
-            for bipt in self._bipt_hist:
-                is_unique_start = is_unique_start and not bipt.is_similar_to(bpt)
 
-            if is_unique_start:
-                bpt.phi_init += bpt.v_init * 1e-3
-                self._build_branch(
-                    *bpt,
-                )
+            # COmmentar!
+            if any([bpt.is_similar_to(bipt) for bipt in self._bipt_hist]):
+                continue
+
+            bpt.phi_init += bpt.v_init * 1e-3
+            self._build_branch(
+                *bpt,
+            )
 
     def _find_branching_points(self):
         """Identify points where the null space of the Jacobian has dimension greater than 1, which indicates branching"""
         branching_points: list[BinodalInitialPoint] = []
         for bb in self.binodal_branches:
-            for bp in bb._degenerate_points():
+            for bp in bb._degenerate_points(self.SV_BRANCH_THRESHOLD):
                 J = self._tracer._jac_fn(bp.phi_init)
                 U, S, Vt = self._tracer._svd(J, full_matrices=True)
-                if np.dot(Vt[-1], bp.v_init) > 0.98 and S[-1] < 1e-4:
+                if (
+                    np.dot(Vt[-1], bp.v_init) > 0.98
+                    and S[-1] < self.SV_BRANCH_THRESHOLD
+                ):
                     bp.v_init = np.asarray(Vt[-2])
                     branching_points.append(bp)
 
@@ -158,35 +165,36 @@ if __name__ == "__main__":
     from pyphasediagram.spinodal import Spinodal
     import tqdm
 
-    chi_12, chi_01, chi_02 = np.random.random(3) + 2
-    for iteration, chi in enumerate(
-        tqdm.tqdm(np.linspace(2.1, 3.5, 141), desc="Processing")
-    ):
-        chi_12, chi_01, chi_02 = chi, chi, chi
-        chis = np.array(
-            [
-                [-2 * chi_01, chi_12 - chi_01 - chi_02],
-                [chi_12 - chi_01 - chi_02, -2 * chi_02],
-            ]
-        )
+    chi_12, chi_01, chi_02 = (
+        0.8,
+        1.1,
+        2.2,
+    )
+    chis = np.array(
+        [
+            [-2 * chi_01, chi_12 - chi_01 - chi_02],
+            [chi_12 - chi_01 - chi_02, -2 * chi_02],
+        ]
+    )
 
-        sp_obj = Spinodal(chis)
-        sp_obj.build()
-        cps = sp_obj.critical_points
+    sp_obj = Spinodal(chis)
+    sp_obj.build()
+    cps = sp_obj.critical_points
 
-        obj = Binodal(chis, cps)
-        obj.build()
+    obj = Binodal(chis, cps)
+    obj.build()
 
-        sp_obj.plot()
-        # print("\t", end=" ")
-        for i, branch in enumerate(obj.binodal_branches):
-            if i == 0:
-                branch.plot(label=f"Binodal")
-            else:
-                branch.plot()
-            # print(f"{len(branch)}", end=", ")
-        # print()
-        plt.legend()
-        plt.title(r"$\chi = $" + f"{chi_12:.3f}")
-        plt.savefig(f"delete/binodal_{iteration}.png")
-        plt.close()
+    sp_obj.plot()
+    # print("\t", end=" ")
+    for i, branch in enumerate(obj.binodal_branches):
+        if i == 0:
+            branch.plot(label=f"Binodal")
+        else:
+            branch.plot()
+        # print(f"{len(branch)}", end=", ")
+    plt.xlabel(r"$\phi_C$")
+    plt.ylabel(r"$\phi_A$")
+    # print()
+    plt.legend()
+    plt.savefig("literaturediscussion.png")
+    plt.show()
