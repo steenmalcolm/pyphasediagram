@@ -103,6 +103,7 @@ class Spinodal:
             if (n.phi1 < 0) or (n.phi2 < 0) or (n.phi1 + n.phi2 > 1)
         ]
         self.spinodal_graph.remove_nodes_from(to_remove)
+
         # Edge case remove subgraphs with single point
         comps = list(nx.connected_components(self.spinodal_graph))
         for comp in comps:
@@ -210,9 +211,12 @@ class Spinodal:
                     Warning(
                         f"Third derivative at critical point ({phi1_c:.2f}, {phi2_c:.2f}) is quite large: {td_c:.5f}.\nTry increasing resolution of spinodal curve."
                     )
-                assert abs(td_c) < np.std(
-                    xp
-                ), f"Third derivative at critical point ({phi1_c:.2f}, {phi2_c:.2f}) is not close to zero: {td_c:.5f}\n(chi_11, chi_22, chi_12)=({self.chis[0, 0]}, {self.chis[1, 1]}, {self.chis[0, 1]})\nTry increasing resolution of spinodal curve."
+                if abs(td_c) >= np.std(xp):
+                    raise RuntimeError(
+                        f"Third derivative at critical point ({phi1_c:.2f}, {phi2_c:.2f}) is not close to zero: {td_c:.5f}\n"
+                        f"(chi_11, chi_22, chi_12)=({self.chis[0, 0]}, {self.chis[1, 1]}, {self.chis[0, 1]})\n"
+                        f"Try increasing resolution of spinodal curve."
+                    )
                 self.critical_points.append(
                     CriticalPoint(-1, phi1_c, phi2_c, dphi1, dphi2)
                 )
