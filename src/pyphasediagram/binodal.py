@@ -6,7 +6,7 @@ from pyphasediagram.point import CriticalPoint, BinodalInitialPoint
 from pyphasediagram.stepper import Stepper
 
 
-class BinodalBranch:
+class BinodalSection:
     def __init__(self, phis: np.ndarray, svs: np.ndarray):
         self.phis = phis
         self.svs = svs
@@ -19,10 +19,10 @@ class BinodalBranch:
         plt.plot(self.phis[1, 0], self.phis[1, 1], color=colorb, **kwargs)
 
     def intersects_with(self, other):
-        """Check if this binodal branch intersects with another binodal branch by checking if their corresponding lines intersect using shapely."""
-        if not isinstance(other, BinodalBranch):
+        """Check if this binodal section intersects with another binodal section by checking if their corresponding lines intersect using shapely."""
+        if not isinstance(other, BinodalSection):
             raise NotImplementedError(
-                "intersects_with can only be computed between BinodalBranch instances."
+                "intersects_with can only be computed between BinodalSection instances."
             )
         i_points = []
 
@@ -39,10 +39,10 @@ class BinodalBranch:
         return i_points
 
     def contained_in(self, other, n_samples=1000):
-        """Check if this binodal branch is contained within another binodal branch by"""
-        if not isinstance(other, BinodalBranch):
+        """Check if this binodal section is contained within another binodal section by"""
+        if not isinstance(other, BinodalSection):
             raise NotImplementedError(
-                "contained_in can only be computed between BinodalBranch instances."
+                "contained_in can only be computed between BinodalSection instances."
             )
 
         # System invariant under swap of phase labeling
@@ -86,30 +86,30 @@ class Binodal:
         """Initialize the Binodal class with a 2x2 matrix of chi parameters"""
         self.chis = chis
         self.critical_points = critical_points
-        self.binodal_branches: list[BinodalBranch] = []
+        self.binodal_sections: list[BinodalSection] = []
         self._tracer = Stepper(chis)
         self._bipt_hist: list[BinodalInitialPoint] = []
 
-    def _build_branch(self, phi_init, v_init):
+    def _build_section(self, phi_init, v_init):
         """
-        Build a branch of the binodal curve starting from an initial composition phi_init and initial step v_init. This method runs the tracer to compute the binodal points along the branch and adds them as nodes in the binodal graph, connecting consecutive points with edges.
+        Build a section of the binodal curve starting from an initial composition phi_init and initial step v_init. This method runs the tracer to compute the binodal points along the section and adds them as nodes in the binodal graph, connecting consecutive points with edges.
         """
-        # Run the tracer to compute the binodal points along the branch
+        # Run the tracer to compute the binodal points along the section
         phis, svs, flags = self._tracer.run(phi_init, v_init)
         # if len(flags):
         #     print("\t", end=" ")
         #     for flag in flags:
         #         print(f"{flag}", end=", ")
         #     print()
-        bb_new = BinodalBranch(phis, svs)
+        bb_new = BinodalSection(phis, svs)
 
         # Avoid duplicates
-        for bb in self.binodal_branches:
+        for bb in self.binodal_sections:
             if bb_new.contained_in(bb):
                 return False
 
-        # Save the new branch and its initial point
-        self.binodal_branches.append(BinodalBranch(phis, svs))
+        # Save the new section and its initial point
+        self.binodal_sections.append(BinodalSection(phis, svs))
         self._bipt_hist.append(BinodalInitialPoint(phi_init, v_init))
         return True
 
@@ -118,18 +118,18 @@ class Binodal:
         Build the binodal curve as a graph with nodes representing points (phi1a, phi2a, phi1b, phi2b) on the curve.
         Edges connect consecutive points along the curve. The graph is stored in self.binodal_graph.
         """
-        # Branches from binary limits
+        # Sections from binary limits
         for which_comp in range(3):
             phi_init, v_init = self._tracer.binary_init(which_comp)
             if isinstance(phi_init, np.ndarray):
-                self._build_branch(phi_init, v_init)
+                self._build_section(phi_init, v_init)
 
-        # Branches from critical points
+        # Sections from critical points
         for cpt in self.critical_points:
             phi_init, v_init = cpt.get_phi_and_v_init()
-            self._build_branch(phi_init, v_init)
+            self._build_section(phi_init, v_init)
 
-        # TODO: Keep iterating until all branching points have been explored, but for now just do one pass
+        # TODO: Keep iterating until all Branching points have been explored, but for now just do one pass
         for bpt in self._find_branching_points():
 
             # COmmentar!
@@ -137,14 +137,14 @@ class Binodal:
                 continue
 
             bpt.phi_init += bpt.v_init * 1e-3
-            self._build_branch(
+            self._build_section(
                 *bpt,
             )
 
     def _find_branching_points(self):
         """Identify points where the null space of the Jacobian has dimension greater than 1, which indicates branching"""
         branching_points: list[BinodalInitialPoint] = []
-        for bb in self.binodal_branches:
+        for bb in self.binodal_sections:
             for bp in bb._degenerate_points(self.SV_BRANCH_THRESHOLD):
                 J = self._tracer._jac_fn(bp.phi_init)
                 U, S, Vt = self._tracer._svd(J, full_matrices=True)
@@ -158,8 +158,8 @@ class Binodal:
         return branching_points
 
     def plot(self, **kwargs):
-        for branch in self.binodal_branches:
-            branch.plot(**kwargs)
+        for section in self.binodal_section:
+            section.plot(**kwargs)
 
 
 if __name__ == "__main__":
@@ -187,11 +187,11 @@ if __name__ == "__main__":
 
     sp_obj.plot()
     # print("\t", end=" ")
-    for i, branch in enumerate(obj.binodal_branches):
+    for i, section in enumerate(obj.binodal_sections):
         if i == 0:
-            branch.plot(label=f"Binodal")
+            section.plot(label=f"Binodal")
         else:
-            branch.plot()
+            section.plot()
         # print(f"{len(branch)}", end=", ")
     plt.xlabel(r"$\phi_C$")
     plt.ylabel(r"$\phi_A$")
