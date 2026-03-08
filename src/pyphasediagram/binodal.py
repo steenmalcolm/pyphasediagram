@@ -38,7 +38,7 @@ class BinodalBranch:
 
         return i_points
 
-    def contained_in(self, other):
+    def contained_in(self, other, n_samples=1000):
         """Check if this binodal branch is contained within another binodal branch by"""
         if not isinstance(other, BinodalBranch):
             raise NotImplementedError(
@@ -47,14 +47,15 @@ class BinodalBranch:
 
         # System invariant under swap of phase labeling
         for la, lb in [(self.line_a, self.line_b), (self.line_b, self.line_a)]:
-            ia = la.intersection(other.line_a)
-            ib = lb.intersection(other.line_b)
-            if ia.geom_type == "MultiPoint" and ib.geom_type == "MultiPoint":
-                if (
-                    len(ia.geoms) > len(la.coords) / 2
-                    and len(ib.geoms) > len(lb.coords) / 2
-                ):
-                    return True
+
+            sa = np.linspace(0.0, la.length, n_samples)
+            da = np.array([la.interpolate(si).distance(other.line_a) for si in sa])
+
+            sb = np.linspace(0.0, lb.length, n_samples)
+            db = np.array([lb.interpolate(si).distance(other.line_b) for si in sb])
+
+            if np.mean(da) < 1e-3 and np.mean(db) < 1e-3:
+                return True
         return False
 
     def _degenerate_points(
