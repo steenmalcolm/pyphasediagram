@@ -109,6 +109,9 @@ class Binodal:
             if bb_new.contained_in(bb):
                 return False
 
+        # Find branching points and add them to the task list
+        self._bipt_task_list.extend(self._find_branching_points(bb_new))
+
         # Save the new section and its initial point
         self.binodal_sections.append(BinodalSection(phis, svs))
         self._bipt_hist.append(BinodalInitialPoint(phi_init, v_init))
@@ -123,38 +126,31 @@ class Binodal:
         for which_comp in range(3):
             phi_init, v_init = self._stepper.binary_init(which_comp)
             if isinstance(phi_init, np.ndarray):
-                self._build_section(phi_init, v_init)
+                self._bipt_task_list.append(BinodalInitialPoint(phi_init, v_init))
 
         # Sections from critical points
         for cpt in self.critical_points:
             phi_init, v_init = cpt.get_phi_and_v_init()
-            self._build_section(phi_init, v_init)
+            self._bipt_task_list.append(BinodalInitialPoint(phi_init, v_init))
 
-        # TODO: Keep iterating until all Branching points have been explored, but for now just do one pass
-        for bpt in self._find_branching_points():
-
-            # COmmentar!
-            if any([bpt.is_similar_to(bipt) for bipt in self._bipt_hist]):
+        while len(self._bipt_task_list):
+            bipt = self._bipt_task_list.pop(0)
+            if any(bipt.is_similar_to(other) for other in self._bipt_hist):
                 continue
+            self._build_section(*bipt)
 
-            bpt.phi_init += bpt.v_init * 1e-3
-            self._build_section(
-                *bpt,
-            )
-
-    def _find_branching_points(self):
+    def _find_branching_points(
+        self, section: BinodalSection
+    ) -> list[BinodalInitialPoint]:
         """Identify points where the null space of the Jacobian has dimension greater than 1, which indicates branching"""
         branching_points: list[BinodalInitialPoint] = []
-        for bb in self.binodal_sections:
-            for bp in bb._degenerate_points(self.SV_BRANCH_THRESHOLD):
-                J = self._stepper._jac_fn(bp.phi_init)
-                U, S, Vt = self._stepper._svd(J, full_matrices=True)
-                if (
-                    np.dot(Vt[-1], bp.v_init) > 0.98
-                    and S[-1] < self.SV_BRANCH_THRESHOLD
-                ):
-                    bp.v_init = np.asarray(Vt[-2])
-                    branching_points.append(bp)
+        for bp in section._degenerate_points(self.SV_BRANCH_THRESHOLD):
+            J = self._stepper._jac_fn(bp.phi_init)
+            U, S, Vt = self._stepper._svd(J, full_matrices=True)
+            if np.dot(Vt[-1], bp.v_init) > 0.98 and S[-1] < self.SV_BRANCH_THRESHOLD:
+                bp.v_init = np.asarray(Vt[-2])
+                bp.phi_init += bp.v_init * 1e-3
+                branching_points.append(bp)
 
         return branching_points
 
@@ -167,11 +163,7 @@ if __name__ == "__main__":
     from pyphasediagram.spinodal import Spinodal
     import tqdm
 
-    chi_12, chi_01, chi_02 = (
-        0.8,
-        1.1,
-        2.2,
-    )
+    chi_12, chi_01, chi_02 = (2.7, 2.7, 2.7)
     chis = np.array(
         [
             [-2 * chi_01, chi_12 - chi_01 - chi_02],
@@ -193,7 +185,6 @@ if __name__ == "__main__":
             section.plot(label=f"Binodal")
         else:
             section.plot()
-        # print(f"{len(branch)}", end=", ")
     plt.xlabel(r"$\phi_C$")
     plt.ylabel(r"$\phi_A$")
     # print()
