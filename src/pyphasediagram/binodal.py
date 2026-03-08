@@ -87,15 +87,16 @@ class Binodal:
         self.chis = chis
         self.critical_points = critical_points
         self.binodal_sections: list[BinodalSection] = []
-        self._tracer = Stepper(chis)
+        self._stepper = Stepper(chis)
+        self._bipt_task_list: list[BinodalInitialPoint] = []
         self._bipt_hist: list[BinodalInitialPoint] = []
 
     def _build_section(self, phi_init, v_init):
         """
-        Build a section of the binodal curve starting from an initial composition phi_init and initial step v_init. This method runs the tracer to compute the binodal points along the section and adds them as nodes in the binodal graph, connecting consecutive points with edges.
+        Build a section of the binodal curve starting from an initial composition phi_init and initial step v_init. This method runs the stepper to compute the binodal points along the section and adds them as nodes in the binodal graph, connecting consecutive points with edges.
         """
-        # Run the tracer to compute the binodal points along the section
-        phis, svs, flags = self._tracer.run(phi_init, v_init)
+        # Run the stepper to compute the binodal points along the section
+        phis, svs, flags = self._stepper.run(phi_init, v_init)
         # if len(flags):
         #     print("\t", end=" ")
         #     for flag in flags:
@@ -120,7 +121,7 @@ class Binodal:
         """
         # Sections from binary limits
         for which_comp in range(3):
-            phi_init, v_init = self._tracer.binary_init(which_comp)
+            phi_init, v_init = self._stepper.binary_init(which_comp)
             if isinstance(phi_init, np.ndarray):
                 self._build_section(phi_init, v_init)
 
@@ -146,8 +147,8 @@ class Binodal:
         branching_points: list[BinodalInitialPoint] = []
         for bb in self.binodal_sections:
             for bp in bb._degenerate_points(self.SV_BRANCH_THRESHOLD):
-                J = self._tracer._jac_fn(bp.phi_init)
-                U, S, Vt = self._tracer._svd(J, full_matrices=True)
+                J = self._stepper._jac_fn(bp.phi_init)
+                U, S, Vt = self._stepper._svd(J, full_matrices=True)
                 if (
                     np.dot(Vt[-1], bp.v_init) > 0.98
                     and S[-1] < self.SV_BRANCH_THRESHOLD
