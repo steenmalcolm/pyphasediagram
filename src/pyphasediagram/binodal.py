@@ -7,11 +7,13 @@ from pyphasediagram.stepper import Stepper
 
 
 class BinodalSection:
+
     def __init__(self, phis: np.ndarray, svs: np.ndarray):
         self.phis = phis
         self.svs = svs
         self.line_a = shapely.LineString(phis[0].T)
         self.line_b = shapely.LineString(phis[1].T)
+        self.line_ab = shapely.LineString(phis.reshape(4, -1).T)
 
     def plot(self, colora="red", colorb="blue", **kwargs):
         plt.plot(self.phis[0, 0], self.phis[0, 1], color=colora, **kwargs)
@@ -24,19 +26,82 @@ class BinodalSection:
             raise NotImplementedError(
                 "intersects_with can only be computed between BinodalSection instances."
             )
-        i_points = []
 
-        def add_intersection(l1, l2):
-            i = l1.intersection(l2)
+        def add_intersection(l1a, l2a):
+            i_points = []
+            i = l1a.intersection(l2a)
+
             if i.geom_type == "Point":
-                i_points.append(i)
+                idxs = []
+                for l in [l1a, l2a]:
+                    coords = list(l.coords)
+                    idx_closest = min(
+                        range(len(coords)),
+                        key=lambda j: i.distance(shapely.Point(coords[j])),
+                    )
+                    idxs.append(idx_closest)
+                i_points.append(idxs)
 
-        add_intersection(self.line_a, other.line_a)
-        add_intersection(self.line_a, other.line_b)
-        add_intersection(self.line_b, other.line_a)
-        add_intersection(self.line_b, other.line_b)
+            elif i.geom_type == "MultiPoint":
+                for p in i.geoms:
+                    idxs = []
+                    for l in [l1a, l2a]:
+                        coords = list(l.coords)
+                        idx_closest = min(
+                            range(len(coords)),
+                            key=lambda j: p.distance(shapely.Point(coords[j])),
+                        )
+                        idxs.append(idx_closest)
+                    i_points.append(idxs)
+            return i_points
 
-        return i_points
+        tp_points = []
+        i_points = add_intersection(self.line_a, other.line_a)
+        for idxs in i_points:
+            tp_points.append(
+                (
+                    self.phis[0, :, idxs[0]],
+                    other.phis[0, :, idxs[1]],
+                    self.phis[1, :, idxs[0]],
+                    other.phis[1, :, idxs[1]],
+                )
+            )
+
+        i_points = add_intersection(self.line_a, other.line_b)
+        for idxs in i_points:
+            tp_points.append(
+                (
+                    self.phis[0, :, idxs[0]],
+                    other.phis[1, :, idxs[1]],
+                    self.phis[1, :, idxs[0]],
+                    other.phis[0, :, idxs[1]],
+                )
+            )
+
+        i_points = add_intersection(self.line_b, other.line_a)
+        for idxs in i_points:
+            tp_points.append(
+                (
+                    self.phis[1, :, idxs[0]],
+                    other.phis[0, :, idxs[1]],
+                    self.phis[0, :, idxs[0]],
+                    other.phis[1, :, idxs[1]],
+                )
+            )
+
+        i_points = add_intersection(self.line_b, other.line_b)
+        for idxs in i_points:
+            tp_points.append(
+                (
+                    self.phis[1, :, idxs[0]],
+                    other.phis[1, :, idxs[1]],
+                    self.phis[0, :, idxs[0]],
+                    other.phis[0, :, idxs[1]],
+                )
+            )
+
+        # Plot self.line_a and self.line_b
+        return tp_points
 
     def contained_in(self, other, n_samples=1000):
         """Check if this binodal section is contained within another binodal section by"""
@@ -90,6 +155,7 @@ class Binodal:
         self._stepper = Stepper(chis)
         self._bipt_task_list: list[BinodalInitialPoint] = []
         self._bipt_hist: list[BinodalInitialPoint] = []
+        self._three_phase_points = []
 
     def _build_section(self, phi_init, v_init):
         """
@@ -139,6 +205,8 @@ class Binodal:
                 continue
             self._build_section(*bipt)
 
+        self._find_three_phase_points()
+
     def _find_branching_points(
         self, section: BinodalSection
     ) -> list[BinodalInitialPoint]:
@@ -154,8 +222,17 @@ class Binodal:
 
         return branching_points
 
+    def _find_three_phase_points(self):
+        for i, section_a in enumerate(self.binodal_sections):
+            for j, section_b in enumerate(self.binodal_sections):
+                if i >= j:
+                    continue
+                i_points = section_a.intersects_with(section_b)
+                for i_point in i_points:
+                    self._three_phase_points.append(i_point)
+
     def plot(self, **kwargs):
-        for section in self.binodal_section:
+        for section in self.binodal_sections:
             section.plot(**kwargs)
 
 
@@ -163,7 +240,8 @@ if __name__ == "__main__":
     from pyphasediagram.spinodal import Spinodal
     import tqdm
 
-    chi_12, chi_01, chi_02 = (2.7, 2.7, 2.7)
+    chi = 2.6
+    chi_12, chi_01, chi_02 = (chi, chi, chi)
     chis = np.array(
         [
             [-2 * chi_01, chi_12 - chi_01 - chi_02],
@@ -179,12 +257,24 @@ if __name__ == "__main__":
     obj.build()
 
     sp_obj.plot()
-    # print("\t", end=" ")
-    for i, section in enumerate(obj.binodal_sections):
-        if i == 0:
-            section.plot(label=f"Binodal")
-        else:
-            section.plot()
+    for section in obj.binodal_sections:
+        section.plot()
+    polys = [shapely.Polygon(t) for t in obj._three_phase_points]
+    poly = polys[0]
+    for poly in polys:
+        x, y = poly.exterior.xy
+        plt.fill(x, y, alpha=0.5)
+    union = shapely.unary_union(polys)
+    if union.geom_type == "Polygon":
+        x, y = union.exterior.xy
+
+        plt.plot(x, y)
+        plt.fill(x, y, alpha=0.3)
+    elif union.geom_type == "MultiPolygon":
+        for geom in union.geoms:
+            x, y = geom.exterior.xy
+            plt.plot(x, y)
+            plt.fill(x, y, alpha=0.3)
     plt.xlabel(r"$\phi_C$")
     plt.ylabel(r"$\phi_A$")
     # print()
