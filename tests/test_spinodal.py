@@ -400,10 +400,49 @@ def test_find_critical_points_raises_on_nan_third_derivative(monkeypatch, simple
         sp._find_critical_points()
 
 
+# ----------------------------
+# Tests: Spinodal._in_domain
+# ----------------------------
+
+
+class TestInDomain:
+    def test_interior_point(self):
+        assert Spinodal._in_domain(0.2, 0.3) == True
+
+    def test_origin_excluded(self):
+        assert Spinodal._in_domain(0.0, 0.0) == False
+
+    def test_boundary_excluded(self):
+        assert Spinodal._in_domain(0.5, 0.5) == False  # phi1 + phi2 == 1
+        assert Spinodal._in_domain(0.0, 0.5) == False  # phi1 == 0
+        assert Spinodal._in_domain(0.5, 0.0) == False  # phi2 == 0
+
+    def test_corner_points_excluded(self):
+        assert Spinodal._in_domain(0.0, 1.0) == False
+        assert Spinodal._in_domain(1.0, 0.0) == False
+
+    def test_outside_negative_phi1(self):
+        assert Spinodal._in_domain(-0.1, 0.5) == False
+
+    def test_outside_negative_phi2(self):
+        assert Spinodal._in_domain(0.5, -0.1) == False
+
+    def test_outside_sum_exceeds_one(self):
+        assert Spinodal._in_domain(0.6, 0.5) == False
+
+    def test_array_input(self):
+        phi1 = np.array([0.2, -0.1, 0.6, 0.0])
+        phi2 = np.array([0.3, 0.5, 0.5, 0.5])
+        result = Spinodal._in_domain(phi1, phi2)
+        expected = np.array([True, False, False, False])
+        np.testing.assert_array_equal(result, expected)
+
+
 # tests/test_spinodal_e2e.py
 import numpy as np
 import pytest
 import networkx as nx
+import shapely
 
 from pyphasediagram.spinodal import Spinodal
 
@@ -460,7 +499,7 @@ def test_e2e_spinodal_invariants_random_chis(seed):
     rng = np.random.default_rng(seed)
     chis = _random_chis(rng, -10.0, 10.0)
 
-    sp = _build_spinodal_or_skip(chis, num_points=800)
+    sp = _build_spinodal_or_skip(chis)
     G = sp.spinodal_graph
     nodes = list(G.nodes())
 
@@ -537,6 +576,32 @@ def test_e2e_spinodal_invariants_random_chis(seed):
             np.sqrt((cp.phi1 - n.phi1) ** 2 + (cp.phi2 - n.phi2) ** 2) for n in nodes
         )
         assert dmin < 0.05  # tune based on resolution
+
+    # --- 10) Random points inside locally-stable polygons have both eigenvalues positive
+    if sp.polygons:
+        for poly in sp.polygons:
+            if poly.is_empty:
+                continue
+            minx, miny, maxx, maxy = poly.bounds
+            n_samples = 0
+            attempts = 0
+            while n_samples < 20 and attempts < 200:
+                px = rng.uniform(minx, maxx)
+                py = rng.uniform(miny, maxy)
+                attempts += 1
+                if poly.contains(
+                    shapely.geometry.Point(px, py)
+                ) and Spinodal._in_domain(px, py):
+                    ev1, ev2 = sp.eigenvalues_from_phi(px, py)
+                    ev_norm = np.sqrt(ev1**2 + ev2**2)
+                    # Allow some slack for numerical issues, but generally should be positive in stable region.
+                    assert (
+                        ev1 / ev_norm > -1e-4
+                    ), f"ev1={ev1} not positive at ({px}, {py})"
+                    assert (
+                        ev2 / ev_norm > -1e-4
+                    ), f"ev2={ev2} not positive at ({px}, {py})"
+                    n_samples += 1
 
 
 @pytest.mark.parametrize("chi", np.linspace(2.1, 3.5, 29))
