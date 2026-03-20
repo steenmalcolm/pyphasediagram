@@ -13,11 +13,55 @@ class BinodalSection:
         self.svs = svs
         self.line_a = shapely.LineString(phis[0].T)
         self.line_b = shapely.LineString(phis[1].T)
+        self._lines = (self.line_a, self.line_b)
+        self._coords = tuple(np.asarray(line.coords) for line in self._lines)
 
-    def plot(self, colora="red", colorb="blue", **kwargs):
+    def plot(self, colora="red", colorb="blue", is_tie_lines=False, **kwargs):
         plt.plot(self.phis[0, 0], self.phis[0, 1], color=colora, **kwargs)
-
         plt.plot(self.phis[1, 0], self.phis[1, 1], color=colorb, **kwargs)
+        if is_tie_lines:
+            # Plot at most 20 tie lines for clarity
+            step_size = max(1, self.phis.shape[2] // 20)
+            plt.plot(
+                [self.phis[0, 0, ::step_size], self.phis[1, 0, ::step_size]],
+                [self.phis[0, 1, ::step_size], self.phis[1, 1, ::step_size]],
+                color="gray",
+                alpha=0.5,
+            )
+
+    @staticmethod
+    def _closest_coord_index(coords: np.ndarray, point) -> int:
+        point_xy = np.array([point.x, point.y])
+        distances_sq = np.sum((coords - point_xy) ** 2, axis=1)
+        return int(np.argmin(distances_sq))
+
+    def _intersection_indices(self, self_idx: int, other, other_idx: int):
+        line_1 = self._lines[self_idx]
+        line_2 = other._lines[other_idx]
+
+        # Skip if line bounding squares do not overlap
+        minx_1, miny_1, maxx_1, maxy_1 = line_1.bounds
+        minx_2, miny_2, maxx_2, maxy_2 = line_2.bounds
+        if maxx_1 < minx_2 or maxx_2 < minx_1 or maxy_1 < miny_2 or maxy_2 < miny_1:
+            return []
+
+        intersection = line_1.intersection(line_2)
+        if intersection.geom_type == "Point":
+            points = (intersection,)
+        elif intersection.geom_type == "MultiPoint":
+            points = intersection.geoms
+        else:
+            return []
+
+        coords_1 = self._coords[self_idx]
+        coords_2 = other._coords[other_idx]
+        return [
+            (
+                self._closest_coord_index(coords_1, point),
+                self._closest_coord_index(coords_2, point),
+            )
+            for point in points
+        ]
 
     def intersects_with(self, other):
         """Check if this binodal section intersects with another binodal section by checking if their corresponding lines intersect using shapely."""
@@ -26,42 +70,12 @@ class BinodalSection:
                 "intersects_with can only be computed between BinodalSection instances."
             )
 
-        def intersection_indices(line_1, line_2):
-            i_points = []
-            i = line_1.intersection(line_2)
-
-            if i.geom_type == "Point":
-                idxs = []
-                for line in (line_1, line_2):
-                    coords = list(line.coords)
-                    idx_closest = min(
-                        range(len(coords)),
-                        key=lambda j: i.distance(shapely.Point(coords[j])),
-                    )
-                    idxs.append(idx_closest)
-                i_points.append(idxs)
-
-            elif i.geom_type == "MultiPoint":
-                for p in i.geoms:
-                    idxs = []
-                    for line in (line_1, line_2):
-                        coords = list(line.coords)
-                        idx_closest = min(
-                            range(len(coords)),
-                            key=lambda j: p.distance(shapely.Point(coords[j])),
-                        )
-                        idxs.append(idx_closest)
-                    i_points.append(idxs)
-            return i_points
-
-        self_lines = (self.line_a, self.line_b)
-        other_lines = (other.line_a, other.line_b)
         tp_points = []
-        for self_idx, self_line in enumerate(self_lines):
+        for self_idx, _ in enumerate(self._lines):
             other_self_idx = 1 - self_idx
-            for other_idx, other_line in enumerate(other_lines):
+            for other_idx, _ in enumerate(other._lines):
                 other_other_idx = 1 - other_idx
-                idxs = intersection_indices(self_line, other_line)
+                idxs = self._intersection_indices(self_idx, other, other_idx)
                 for idx in idxs:
                     tp_points.append(
                         (
@@ -72,7 +86,6 @@ class BinodalSection:
                         )
                     )
 
-        # Plot self.line_a and self.line_b
         return tp_points
 
     def contained_in(self, other, n_samples=1000):
@@ -204,68 +217,8 @@ class Binodal:
                     self._three_phase_points.append(i_point)
 
     def plot(self, **kwargs):
-        for section in self.binodal_sections:
-            section.plot(**kwargs)
-
-
-if __name__ == "__main__":
-
-    from pyphasediagram.spinodal import Spinodal
-    import tqdm
-
-    chi = 2.7
-    chi_12, chi_01, chi_02 = (chi, chi, chi)
-    chis = np.array(
-        [
-            [-2 * chi_01, chi_12 - chi_01 - chi_02],
-            [chi_12 - chi_01 - chi_02, -2 * chi_02],
-        ]
-    )
-
-    sp_obj = Spinodal(chis)
-    sp_obj.build()
-    cps = sp_obj.critical_points
-
-    import cProfile
-    import pstats
-
-    obj = Binodal(chis, cps)
-
-    profiler = cProfile.Profile()
-    profiler.enable()
-    obj.build()
-    profiler.disable()
-    stats = pstats.Stats(profiler).sort_stats("cumtime")
-
-    targets = {
-        "_build_section": None,
-        "_find_three_phase_points": None,
-    }
-
-    for func, stat in stats.stats.items():
-        filename, line, funcname = func
-        if filename.endswith("binodal.py") and funcname in targets:
-            cc, nc, tt, ct, callers = stat
-            print(
-                f"{funcname}: ncalls={nc}, "
-                f"avg_self={tt / nc:.6f}s, "
-                f"avg_total={ct / nc:.6f}s, "
-                f"self_total={tt:.6f}s, total={ct:.6f}s"
-            )
-
-    sp_obj.plot()
-    for section in obj.binodal_sections:
-        section.plot()
-    polys = [shapely.Polygon(t) for t in obj._three_phase_points]
-    for i, poly in enumerate(polys):
-        x, y = poly.exterior.xy
-        if i == 0:
-            plt.fill(x, y, alpha=0.5, color="orange", label="3 phase region")
-        else:
-            plt.fill(x, y, alpha=0.5, color="orange")
-
-    plt.xlabel(r"$\phi_C$")
-    plt.ylabel(r"$\phi_A$")
-    # print()
-    plt.legend()
-    plt.show()
+        for i, section in enumerate(self.binodal_sections):
+            if i == 0:
+                section.plot(label="Binodal curve", **kwargs)
+            else:
+                section.plot(**kwargs)
