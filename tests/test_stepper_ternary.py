@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 import jax.numpy as jnp
 
-from pyphasediagram.stepper.flory import Stepper
+from pyphasediagram.stepper.flory_stepper import Stepper
 
 # TODO: unit test where _projection_loop WILL fail
 

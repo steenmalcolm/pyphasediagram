@@ -1,1 +1,1 @@
-from pyphasediagram.stepper.flory import Stepper
+from pyphasediagram.stepper.flory_stepper import Stepper
