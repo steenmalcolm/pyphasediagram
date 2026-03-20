@@ -1,10 +1,15 @@
 import numpy as np
 import networkx as nx
 import matplotlib.pyplot as plt
+import shapely
 from pyphasediagram.point import SpinodalPoint, CriticalPoint
+
+# TODO: Throw error if polygons don't match number of connected components. This happens for chi=2.667
 
 
 class Spinodal:
+
+    DOMAIN_CORNERS = [(0, 0), (0, 1), (1, 0)]
 
     def __init__(self, chis: np.ndarray):
         """Initialize the Spinodal class with a 2x2 matrix of chi parameters. The spinodal curve will be computed based on these parameters. The graph structure to store the spinodal curve is initialized as an empty NetworkX graph, and a list to store critical points is also initialized."""
@@ -12,6 +17,7 @@ class Spinodal:
         self.spinodal_graph = nx.Graph()
         self.node_id = 0
         self.critical_points = []
+        self.polygons: list[shapely.geometry.Polygon] = None
 
     def build(self, num_points=5000):
         """
@@ -24,6 +30,7 @@ class Spinodal:
         self._clip_to_domain()
         self._connect_branches()
         self._find_critical_points()
+        self._build_polygons()
 
     def _get_p_q(self, phi, is_calculate_phi2=True):
         """
@@ -43,6 +50,21 @@ class Spinodal:
         discriminant = p**2 / 4 + q
 
         return -p / 2 + np.sqrt(discriminant), -p / 2 - np.sqrt(discriminant)
+
+    def eigenvalues_from_phi(self, phi1, phi2):
+        """Given phi1 and phi2, compute the eigenvalues of the Hessian matrix of the free energy."""
+        phi0 = 1 - phi1 - phi2
+        H_11 = 1 / phi1 + 1 / phi0 + self.chis[0, 0]
+        H_22 = 1 / phi2 + 1 / phi0 + self.chis[1, 1]
+        H_12 = 1 / phi0 + self.chis[0, 1]
+
+        trace = H_11 + H_22
+        det = H_11 * H_22 - H_12**2
+
+        eigenvalue1 = trace / 2 + np.sqrt(trace**2 / 4 - det)
+        eigenvalue2 = trace / 2 - np.sqrt(trace**2 / 4 - det)
+
+        return eigenvalue1, eigenvalue2
 
     def _domain_data(self, phi1_i, phi1_f, num_points=5000):
         """
@@ -90,6 +112,15 @@ class Spinodal:
         roots_idx[::2] += 1
         return phi1_vals[roots_idx]
 
+    @classmethod
+    def _in_domain(cls, phi1, phi2):
+        """Check if the points (phi1, phi2) are inside the open triangular domain defined by DOMAIN_CORNERS.
+        Returns a boolean array (or scalar) that is True where (phi1 > 0, phi2 > 0, phi1 + phi2 < 1).
+        """
+        phi1 = np.asarray(phi1)
+        phi2 = np.asarray(phi2)
+        return (phi1 > 0) & (phi2 > 0) & (phi1 + phi2 < 1)
+
     def _clip_to_domain(self):
         """
         Remove nodes whose (phi1, phi2) lie outside the correct domain
@@ -100,7 +131,7 @@ class Spinodal:
         to_remove = [
             n
             for n in self.spinodal_graph.nodes()
-            if (n.phi1 < 0) or (n.phi2 < 0) or (n.phi1 + n.phi2 > 1)
+            if not self._in_domain(n.phi1, n.phi2)
         ]
         self.spinodal_graph.remove_nodes_from(to_remove)
 
@@ -177,9 +208,12 @@ class Spinodal:
 
             sg = self.spinodal_graph.subgraph(comp)
             phi1, phi2 = self._coords_from_subgraph(sg)
+            mask = self._in_domain(phi1, phi2)
+            phi1, phi2 = phi1[mask], phi2[mask]
 
             third_deriv = self._third_derivative(phi1, phi2)
             if np.isnan(third_deriv).any():
+
                 raise ValueError(
                     "NaN values found in third derivative, check for invalid phi1/phi2 values."
                 )
@@ -221,6 +255,99 @@ class Spinodal:
                     CriticalPoint(-1, phi1_c, phi2_c, dphi1, dphi2)
                 )
 
+    def _build_polygons(self):
+        """Build shapely polygons for the spinodal curve components to facilitate point-in-spinodal checks"""
+        self.polygons = []
+
+        # If needed, store which corner to add to which endpoint
+
+        for comp_idx, comp in enumerate(nx.connected_components(self.spinodal_graph)):
+            sg = self.spinodal_graph.subgraph(comp).copy()
+
+            # Add boundary point if endpoint is close to boundary, such that polygons don't cut through unstable region.
+            endpoints = [n for n, d in sg.degree() if d == 1]
+            if len(endpoints) == 2:
+                for e in endpoints:
+                    boundary_point = None
+                    if e.phi1 < 1e-2:
+                        boundary_point = SpinodalPoint(-1, 0, e.phi2)
+                    elif e.phi2 < 1e-2:
+                        boundary_point = SpinodalPoint(-1, e.phi1, 0)
+                    elif e.phi1 + e.phi2 > 1 - 1e-2:
+                        boundary_point = SpinodalPoint(-1, e.phi1, 1 - e.phi1)
+                    if boundary_point is not None:
+                        sg.add_node(boundary_point)
+                        sg.add_edge(e, boundary_point)
+            endpoints = [n for n, d in sg.degree() if d == 1]
+
+            is_add_corner = [0, 0]
+            if len(endpoints) == 2:
+                for i, e in enumerate(endpoints):
+                    if e.phi1 < 1e-2:
+                        is_add_corner[i] += (1 << 0) + (
+                            1 << 1
+                        )  # add corners (0,0) and (0,1)
+                    if e.phi2 < 1e-2:
+                        is_add_corner[i] += (1 << 0) + (
+                            1 << 2
+                        )  # add corners (0,0) and (1,0)
+                    if e.phi1 + e.phi2 > 1 - 1e-2:
+                        is_add_corner[i] += (1 << 1) + (
+                            1 << 2
+                        )  # add corners (0,1) and (1,0)
+                # Remove the corner which both endpoints have in common
+                # This guarantees that if both endpoints are on the same edge, we don't add any corners
+                # and if they are on different edges we add the correct corners such that the polygon encloses the locally stable area of the domain
+                common_corners = is_add_corner[0] & is_add_corner[1]
+                if is_add_corner[0] ^ is_add_corner[1] > 0:
+                    corner = self.DOMAIN_CORNERS[common_corners.bit_length() - 1]
+                    sg.add_node(SpinodalPoint(-1, corner[0], corner[1]))
+                    sg.add_edge(endpoints[0], SpinodalPoint(-1, corner[0], corner[1]))
+
+            phi1, phi2 = self._coords_from_subgraph(sg)
+            coords = np.column_stack((phi1, phi2))
+            if len(coords) >= 3:  # Need at least 3 points to form a polygon
+
+                poly = shapely.geometry.Polygon(coords)
+                if poly.is_valid:
+                    center = poly.centroid
+                    ev1, ev2 = self.eigenvalues_from_phi(center.x, center.y)
+                    if ev1 < 0 and ev2 < 0:
+                        continue
+
+                    if ev1 * ev2 < 0:
+                        poly = shapely.geometry.Polygon(self.DOMAIN_CORNERS).difference(
+                            poly
+                        )
+                    for other in self.polygons:
+                        if poly.intersects(other):
+                            poly = poly.intersection(other)
+                            # Remove the other polygon from the list since it's now merged with the current one
+                            self.polygons.remove(other)
+                            break
+                    self.polygons.append(poly)
+                else:
+                    print(
+                        "Warning: Invalid polygon formed from spinodal component, skipping polygon creation for this component."
+                    )
+            else:
+                print(
+                    "Warning: Not enough points to form a polygon for this spinodal component, skipping polygon creation for this component."
+                )
+
+    def get_locally_unstable_polygon(self):
+        """Return a shapely polygon representing the locally unstable region of the phase diagram, which is the union of the polygons formed by the spinodal curve components."""
+        if self.polygons is None:
+            raise ValueError(
+                "Polygons have not been built yet. Call _build_polygons() first."
+            )
+        if len(self.polygons) == 0:
+            return None
+        polygon = shapely.geometry.Polygon(self.DOMAIN_CORNERS)
+        for poly in self.polygons:
+            polygon = polygon.difference(poly)
+        return polygon
+
     def plot(self, **kwargs):
         a, b, c = self.chis[0, 0], self.chis[1, 1], self.chis[0, 1]
         plt.figure()
@@ -258,37 +385,14 @@ if __name__ == "__main__":
     import signal
     from tqdm import tqdm
 
-    chi_dr, chi_rs, chi_ds = 3.1, 3.1, 3.1
+    chi = 2.6667
+    chi_dr, chi_rs, chi_ds = chi, chi, chi
     chi_11, chi_22, chi_12 = -2 * chi_ds, -2 * chi_rs, chi_dr - chi_rs - chi_ds
     chis = np.array([[chi_11, chi_12], [chi_12, chi_22]])
     spinodal = Spinodal(chis)
     spinodal.build()  # Monitor this method call
-    spinodal.plot()
+    u_poly = spinodal.get_locally_unstable_polygon()
+    from shapely.plotting import plot_polygon
 
-    # Define a timeout handler
-    def timeout_handler(signum, frame):
-        raise TimeoutError("Method call exceeded 10 seconds.")
-
-    # Register the timeout handler
-    signal.signal(signal.SIGALRM, timeout_handler)
-
-    for i in tqdm(range(1000), desc="Generating spinodal curves"):
-        try:
-            # Set an alarm for 10 seconds
-            signal.alarm(10)
-
-            chi_dr, chi_rs, chi_ds = np.random.random(3) + 2
-            chi_11, chi_22, chi_12 = -2 * chi_ds, -2 * chi_rs, chi_dr - chi_rs - chi_ds
-            chis = np.array([[chi_11, chi_12], [chi_12, chi_22]])
-            spinodal = Spinodal(chis)
-            spinodal.build()  # Monitor this method call
-            spinodal.plot()
-            plt.savefig(f"delete/{i}.png")
-            plt.close()
-
-            # Cancel the alarm if the method completes in time
-            signal.alarm(0)
-        except TimeoutError:
-            print(
-                f"Iteration {i}: Method call timed out.\n(chi_dr, chi_rs, chi_ds)=({chi_dr}, {chi_rs}, {chi_ds})"
-            )
+    for poly in spinodal.polygons:
+        plot_polygon(poly)
