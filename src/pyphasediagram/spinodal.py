@@ -3,6 +3,7 @@ import networkx as nx
 import matplotlib.pyplot as plt
 import shapely
 from pyphasediagram.point import SpinodalPoint, CriticalPoint
+from typing import Optional
 
 # TODO: Throw error if polygons don't match number of connected components. This happens for chi=2.667
 
@@ -19,7 +20,7 @@ class Spinodal:
         self.critical_points = []
         self.polygons: list[shapely.geometry.Polygon] = None
 
-    def build(self, num_points=5000):
+    def build(self, num_points=10000):
         """
         Build the spinodal curve as a graph with nodes representing points (phi1, phi2) on the curve.
         Edges connect consecutive points along the curve. The graph is stored in self.spinodal_graph.
@@ -321,6 +322,9 @@ class Spinodal:
                         )
                     for other in self.polygons:
                         if poly.intersects(other):
+                            # Edge case where overlap is a line or point
+                            if poly.intersection(other).area < 1e-10:
+                                continue
                             poly = poly.intersection(other)
                             # Remove the other polygon from the list since it's now merged with the current one
                             self.polygons.remove(other)
@@ -335,7 +339,7 @@ class Spinodal:
                     "Warning: Not enough points to form a polygon for this spinodal component, skipping polygon creation for this component."
                 )
 
-    def get_locally_unstable_polygon(self):
+    def get_locally_unstable_polygon(self) -> Optional[shapely.geometry.Polygon]:
         """Return a shapely polygon representing the locally unstable region of the phase diagram, which is the union of the polygons formed by the spinodal curve components."""
         if self.polygons is None:
             raise ValueError(
@@ -382,17 +386,29 @@ class Spinodal:
 
 
 if __name__ == "__main__":
-    import signal
-    from tqdm import tqdm
+    from shapely.plotting import plot_polygon
+    import time
 
     chi = 2.6667
-    chi_dr, chi_rs, chi_ds = chi, chi, chi
-    chi_11, chi_22, chi_12 = -2 * chi_ds, -2 * chi_rs, chi_dr - chi_rs - chi_ds
-    chis = np.array([[chi_11, chi_12], [chi_12, chi_22]])
-    spinodal = Spinodal(chis)
-    spinodal.build()  # Monitor this method call
-    u_poly = spinodal.get_locally_unstable_polygon()
-    from shapely.plotting import plot_polygon
 
-    for poly in spinodal.polygons:
-        plot_polygon(poly)
+    i = 0
+    while i < 100:
+        n = time.perf_counter()
+        chi_dr, chi_rs, chi_ds = np.random.uniform(-10, 10, size=3)
+        chi_11, chi_22, chi_12 = -2 * chi_ds, -2 * chi_rs, chi_dr - chi_rs - chi_ds
+        chis = np.array([[chi_11, chi_12], [chi_12, chi_22]])
+        spinodal = Spinodal(chis)
+        spinodal.build()  # Monitor this method call
+        u_poly = spinodal.get_locally_unstable_polygon()
+        spinodal.plot()
+        if u_poly is not None:
+            plot_polygon(u_poly)
+        else:
+            plt.close()
+            continue
+        plt.savefig(f"delete/{i}.png")
+        plt.close()
+        print(
+            f"Completed iteration {i+1}/100 in {time.perf_counter() - n:.2f} seconds."
+        )
+        i += 1
