@@ -1,8 +1,9 @@
+import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
-import matplotlib.pyplot as plt
 import shapely
-from pyphasediagram.point import CriticalPoint, BinodalInitialPoint
+
+from pyphasediagram.point import BinodalInitialPoint, CriticalPoint
 from pyphasediagram.stepper import Stepper
 
 
@@ -137,6 +138,7 @@ class Binodal:
         self.critical_points = critical_points
         self.binodal_sections: list[BinodalSection] = []
         self.three_phase_polygons: list[shapely.Polygon] = None
+        self.two_phase_polygons: list[shapely.Polygon] = None
         self._stepper = Stepper(chis)
         self._bipt_task_list: list[BinodalInitialPoint] = []
         self._bipt_hist: list[BinodalInitialPoint] = []
@@ -211,7 +213,7 @@ class Binodal:
         self._find_three_phase_polygons()
         self._find_two_phase_polygons()
 
-    def _find_three_phase_polygons(self):
+    def _find_three_phase_polygons(self, overlap_threshold: float = 0.98):
         self.three_phase_polygons = []
         for i, section_a in enumerate(self.binodal_sections):
             for j, section_b in enumerate(self.binodal_sections):
@@ -220,19 +222,20 @@ class Binodal:
                 i_points = section_a.intersects_with(section_b)
                 for i_point in i_points:
                     poly = shapely.Polygon(i_point)
-                    # Check if this three-phase point overlaps with any existing three-phase manifold
-                    # and if so, merge them into a single manifold
-                    polys_remove = []
+                    if poly.area < 1e-10:
+                        continue
+                    # Skip near-duplicate polygons (overlap > threshold)
+                    is_duplicate = False
                     for tp_poly in self.three_phase_polygons:
-                        if poly.intersects(tp_poly):
-                            poly = shapely.make_valid(poly.union(tp_poly))
-                            polys_remove.append(tp_poly)
-
-                    # Remove the merged manifold from the list
-                    for tp_poly in polys_remove:
-                        self.three_phase_polygons.remove(tp_poly)
-
-                    self.three_phase_polygons.append(poly)
+                        if not poly.intersects(tp_poly):
+                            continue
+                        intersection_area = poly.intersection(tp_poly).area
+                        overlap = intersection_area / min(poly.area, tp_poly.area)
+                        if overlap > overlap_threshold:
+                            is_duplicate = True
+                            break
+                    if not is_duplicate:
+                        self.three_phase_polygons.append(poly)
 
     def _find_two_phase_polygons(self):
         if self.three_phase_polygons is None:
@@ -326,4 +329,5 @@ class Binodal:
                     x, y, color="orange", alpha=0.5, label="2-phase region", **kwargs
                 )
             else:
+                plt.fill(x, y, color="orange", alpha=0.5, **kwargs)
                 plt.fill(x, y, color="orange", alpha=0.5, **kwargs)
