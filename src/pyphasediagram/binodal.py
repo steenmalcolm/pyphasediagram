@@ -217,7 +217,7 @@ class Binodal:
         self.three_phase_polygons = []
         for i, section_a in enumerate(self.binodal_sections):
             for j, section_b in enumerate(self.binodal_sections):
-                if i >= j:
+                if i > j:
                     continue
                 i_points = section_a.intersects_with(section_b)
                 for i_point in i_points:
@@ -313,9 +313,16 @@ class Binodal:
             + np.dot(phi, self.chis @ phi)
         )
 
-    def tie_line_from_composition(self, phi_means: np.ndarray) -> np.ndarray | None:
-        """Given mean composition, return the compositions of coexisting phases along the tie line that passes through the mean composition.
-        This method considers all tie lines on which the mean composition lies and returns the one with the lowest free energy.
+    def decomposition_from_composition(
+        self, phi_means: np.ndarray
+    ) -> np.ndarray | None:
+        """Given mean composition, return the coexisting phase compositions that
+        the system decomposes into.
+
+        If ``phi_means`` lies inside a three-phase polygon **and** that
+        decomposition has lower free energy than any two-phase tie line, the
+        three vertices of the polygon are returned.  Otherwise the best
+        two-phase tie line through ``phi_means`` is returned.
 
         Parameters
         ----------
@@ -325,14 +332,39 @@ class Binodal:
         Returns
         -------
         np.ndarray or None
-            Shape (2, 2) array [[phi1_a, phi2_a], [phi1_b, phi2_b]] of the
-            coexisting phases, or None if no tie line passes through phi_means.
+            Shape ``(n_phases, 2)`` array of coexisting phase compositions,
+            where ``n_phases`` is 2 or 3.  Returns ``None`` if ``phi_means``
+            is in the single-phase region.
         """
         phi_means = np.asarray(phi_means, dtype=float)
+        pt = shapely.Point(phi_means)
 
-        best_tie_line = None
+        best_result = None
         best_f = np.inf
 
+        # --- Three-phase candidates ---
+        if self.three_phase_polygons is not None:
+            for poly in self.three_phase_polygons:
+                if not poly.contains(pt):
+                    continue
+                verts = np.array(poly.exterior.coords[:3])  # (3, 2)
+                # Solve for volume fractions: verts.T @ v = phi_means, sum(v) = 1
+                A = np.vstack([verts.T, np.ones(3)])  # (3, 3)
+                b = np.append(phi_means, 1.0)
+                try:
+                    vols = np.linalg.solve(A, b)
+                except np.linalg.LinAlgError:
+                    continue
+                if np.any(vols < -1e-6):
+                    continue
+                f = float(
+                    sum(v * self._free_energy(verts[i]) for i, v in enumerate(vols))
+                )
+                if f < best_f:
+                    best_f = f
+                    best_result = verts
+
+        # --- Two-phase candidates ---
         for section in self.binodal_sections:
             # phis shape: (2, 2, N) — [phase, component, index]
             phi_a = section.phis[0]  # (2, N)
@@ -370,14 +402,15 @@ class Binodal:
 
             # Interpolated free energy at phi_means on this tie line
             alpha = t[idx]
-            f = (1.0 - alpha) * self._free_energy(phi_a[:, idx]) + alpha * self._free_energy(phi_b[:, idx])
+            f = (1.0 - alpha) * self._free_energy(
+                phi_a[:, idx]
+            ) + alpha * self._free_energy(phi_b[:, idx])
 
             if f < best_f:
                 best_f = f
-                best_tie_line = section.phis[:, :, idx]
+                best_result = section.phis[:, :, idx]
 
-        return best_tie_line
-
+        return best_result
 
     def plot_sections(self, **kwargs):
         for i, section in enumerate(self.binodal_sections):
