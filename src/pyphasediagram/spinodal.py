@@ -309,7 +309,7 @@ class Spinodal:
             coords = np.column_stack((phi1, phi2))
             if len(coords) >= 3:  # Need at least 3 points to form a polygon
 
-                poly = shapely.geometry.Polygon(coords)
+                poly = shapely.make_valid(shapely.geometry.Polygon(coords))
                 if poly.is_valid:
                     center = poly.centroid
                     ev1, ev2 = self.eigenvalues_from_phi(center.x, center.y)
@@ -339,7 +339,7 @@ class Spinodal:
                     "Warning: Not enough points to form a polygon for this spinodal component, skipping polygon creation for this component."
                 )
 
-    def get_locally_unstable_polygon(self) -> Optional[shapely.geometry.Polygon]:
+    def get_unstable_manifold(self) -> Optional[shapely.geometry.Polygon]:
         """Return a shapely polygon representing the locally unstable region of the phase diagram, which is the union of the polygons formed by the spinodal curve components."""
         if self.polygons is None:
             raise ValueError(
@@ -349,12 +349,11 @@ class Spinodal:
             return None
         polygon = shapely.geometry.Polygon(self.DOMAIN_CORNERS)
         for poly in self.polygons:
-            polygon = polygon.difference(poly)
+            polygon = shapely.make_valid(polygon.difference(poly))
         return polygon
 
     def plot(self, **kwargs):
         a, b, c = self.chis[0, 0], self.chis[1, 1], self.chis[0, 1]
-        plt.figure()
         plt.title(
             r"$(\chi_{11}, \chi_{22}, \chi_{12})$ = " + f"({a:.5f}, {b:.5f}, {c:.5f})"
         )
@@ -399,7 +398,7 @@ if __name__ == "__main__":
         chis = np.array([[chi_11, chi_12], [chi_12, chi_22]])
         spinodal = Spinodal(chis)
         spinodal.build()  # Monitor this method call
-        u_poly = spinodal.get_locally_unstable_polygon()
+        u_poly = spinodal.get_unstable_manifold()
         spinodal.plot()
         if u_poly is not None:
             plot_polygon(u_poly)
