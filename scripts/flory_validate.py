@@ -21,10 +21,27 @@ from tqdm import tqdm
 from pyphasediagram.binodal import Binodal
 from pyphasediagram.spinodal import Spinodal
 
-
 # ---------------------------------------------------------------------------
 # Phase-region area computation
 # ---------------------------------------------------------------------------
+
+
+def _decomposition_energy(chis, phi_mean, phases):
+    """Compute the free energy of *phases* at *phi_mean* via the lever rule.
+
+    *phases* is an (n, 2) array of coexisting phase compositions (n = 2 or 3).
+    Returns float or None if the lever-rule system is degenerate.
+    """
+    n = phases.shape[0]
+    A = np.vstack([phases.T, np.ones(n)])  # (3, n)
+    b = np.append(phi_mean, 1.0)
+    try:
+        vols = np.linalg.solve(A, b)
+    except np.linalg.LinAlgError:
+        return None
+    return float(sum(v * flory_energy(chis, phases[i]) for i, v in enumerate(vols)))
+
+
 def _compute_phase_areas(binodal: Binodal):
     """Return (two_phase_area, three_phase_area) for sample-count allocation."""
     area_2phase = shapely.unary_union(binodal.two_phase_polygons).area
@@ -203,11 +220,20 @@ def validate_two_phase(
             delta_f = f_binodal - f_flory
             # Flory finds lower energy => error in algorithm
             if delta_f > 0:
-                rec["flory_phis"] = flory_phis.tolist()
-                rec["flory_volumes"] = phases.volumes.tolist()
-                rec["f_binodal"] = f_binodal
-                rec["f_flory"] = f_flory
-                rec["delta_f"] = f_binodal - f_flory
+                # Check if a better decomposition exists
+                alt = binodal.decomposition_from_composition(phi_ab)
+                if alt is not None:
+                    f_alt = _decomposition_energy(chis_reduced, phi_ab, alt)
+                    if f_alt is not None and f_alt < f_binodal:
+                        f_binodal = f_alt
+                        delta_f = f_binodal - f_flory
+
+                if delta_f > 0:
+                    rec["flory_phis"] = flory_phis.tolist()
+                    rec["flory_volumes"] = phases.volumes.tolist()
+                    rec["f_binodal"] = f_binodal
+                    rec["f_flory"] = f_flory
+                    rec["delta_f"] = delta_f
 
         records.append(rec)
 
