@@ -96,24 +96,22 @@ class Stepper(BaseStepper):
 
         # Keep initialization in NumPy/Python; convert to JAX arrays at the end
         res = np.asarray(self._residual_jit(jnp.asarray(phi_init)))
-        max_iter = 1000
+        max_iter = 10000
         iteration = 0
 
         while np.linalg.norm(res) > 1e-8:
+            alpha = 1.0 if np.linalg.norm(res) < 1.0 else 0.1
             v, res_jax, _ = self._projection(jnp.asarray(phi_init))
             v = np.asarray(v)
             res = np.asarray(res_jax)
-
             # Use JAX-compatible termination check (works both in and out of jit)
-            if not bool(self.is_terminate(jnp.asarray(phi_init + v))):
-                phi_init = phi_init + v
-            else:
-                vv = v
-                while bool(self.is_terminate(jnp.asarray(phi_init - vv))):
-                    vv = vv * 0.5
-                phi_init = phi_init - vv
+            while bool(self.is_terminate(jnp.asarray(phi_init + v * alpha))):
+                alpha *= 0.5
+            phi_init += v * alpha
 
             if iteration > max_iter:
+                # TODO: remove this stamement
+                return None, None
                 raise RuntimeError("In binary_init: Projection not converging")
             iteration += 1
 
@@ -123,44 +121,48 @@ class Stepper(BaseStepper):
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
     import time
-
-    from pyphasediagram.stepper.spinodal import Spinodal
+    import flory
 
     np.random.seed(42)
     for i in range(100):
-        # Phase separation between components 0 and 2
-        chi_12, chi_01, chi_02 = np.random.random(3) + 2
+        # Test binary_init and compare it to flory
+        chi_12, chi_01 = np.random.uniform(-30, -10, 2)
+        chi_02 = np.random.random() + 2.5
+
         chis = np.array(
             [
                 [-2 * chi_01, chi_12 - chi_01 - chi_02],
                 [chi_12 - chi_01 - chi_02, -2 * chi_02],
             ]
         )
-        # sp = Spinodal(chis)
-        # sp.build()
-        # sp.plot()
-        n_start = time.perf_counter()
+        chis = np.array([[21.97142774, -14.75547769], [-14.75547769, -6.46398788]])
         obj = Stepper(chis)
-        for j in range(3):
-            phi_init, v_init = obj.binary_init(j)
-            if phi_init == None:
-                continue
-            phi_arr, sv_arr = obj.run(phi_init, v_init)
-            # sp.critical_points
-        #     plt.plot(phi_arr[0, 0], phi_arr[0, 1], color="red")
-        #     plt.plot(phi_arr[1, 0], phi_arr[1, 1], color="red")
-        #     plt.scatter(phi_arr[0, 0], phi_arr[0, 1], color="red", s=1)
-        #     plt.scatter(phi_arr[1, 0], phi_arr[1, 1], color="red", s=1)
+        phi_init, v_init = obj.binary_init(1)
 
-        #     phia, phib = phi_arr[:, :, -1]
-        #     if np.linalg.norm(phia - phib) < 1e-3:
-        #         phi_c = np.mean(phi_arr[:, :, -1], axis=0)
-        #         # if np.linalg.norm(np.diff(phi_arr[:,:,-2:],axis=-1)[:,:,-1])
-        #         td = abs(sp._third_derivative(phi_c[0], phi_c[1]))
-        #         if td > 1e-2:
-        #             print(
-        #                 f"\nBinodal critical point does not align with spinodal: td = {td:.2g}\n\t"
-        #             )
-        print(f"{i} Total time: {time.perf_counter() - n_start:.2f}")
-        # plt.savefig(f"delete/{i+10}.png")
-        # plt.close()
+        chi_01, chi_02, chi_12 = (
+            -chis[0, 0] / 2,
+            -chis[1, 1] / 2,
+            chis[0, 1] - (chis[0, 0] + chis[1, 1]) / 2,
+        )
+        chis_3 = np.array(
+            [[0, chi_01, chi_02], [chi_01, 0, chi_12], [chi_02, chi_12, 0]]
+        )
+        if phi_init is not None:
+            phi_means = [0, phi_initw[::2].mean(), phi_init[1::2].mean()]
+        else:
+            phi_means = [0, 1e-3, 0.5]
+        phi_means[0] = 1 - phi_means[1] - phi_means[2]
+        phases = flory.find_coexisting_phases(3, chis_3, phi_means)
+        fracs = phases.fractions[:, 1:].flatten()
+        plt.plot(fracs[::2], fracs[1::2], color="blue", alpha=0.5)
+        if phi_init is not None:
+            plt.scatter(phi_init[::2], phi_init[1::2], color="red", alpha=0.5)
+            print(
+                min(
+                    np.linalg.norm(phi_init - fracs),
+                    np.linalg.norm(np.roll(phi_init, 2) - fracs),
+                )
+            )
+
+    import matplotlib.pyplot as plt
+    plt.plot(phi_init[::2], phi_init[1::2])
