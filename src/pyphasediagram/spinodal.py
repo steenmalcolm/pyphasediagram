@@ -1,9 +1,11 @@
-import numpy as np
-import networkx as nx
-import matplotlib.pyplot as plt
-import shapely
-from pyphasediagram.point import SpinodalPoint, CriticalPoint
 from typing import Optional
+
+import matplotlib.pyplot as plt
+import networkx as nx
+import numpy as np
+import shapely
+
+from pyphasediagram.point import CriticalPoint, SpinodalPoint
 
 # TODO: Throw error if polygons don't match number of connected components. This happens for chi=2.667
 
@@ -276,6 +278,18 @@ class Spinodal:
                         boundary_point = SpinodalPoint(-1, e.phi1, 0)
                     elif e.phi1 + e.phi2 > 1 - 1e-2:
                         boundary_point = SpinodalPoint(-1, e.phi1, 1 - e.phi1)
+                    else:
+                        # Edge case where displacement between e and its neighbor is vertical, such that the resolution is quite bad
+                        nb = next(sg.neighbors(e))
+                        d = e - nb
+                        if (
+                            abs(np.arctan(d[0] / d[1])) < 0.01
+                        ):  # if angle with vertical is less than 0.01 radians (~0.57 degrees)
+                            if d[1] < 0:
+
+                                boundary_point = SpinodalPoint(-1, e.phi1, 0)
+                            else:
+                                boundary_point = SpinodalPoint(-1, e.phi1, 1 - e.phi1)
                     if boundary_point is not None:
                         sg.add_node(boundary_point)
                         sg.add_edge(e, boundary_point)
@@ -385,8 +399,9 @@ class Spinodal:
 
 
 if __name__ == "__main__":
-    from shapely.plotting import plot_polygon
     import time
+
+    from shapely.plotting import plot_polygon
 
     chi = 2.6667
 
