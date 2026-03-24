@@ -80,7 +80,6 @@ class BinodalSection:
                     tp_points.append(
                         (
                             self.phis[self_idx, :, idx[0]],
-                            other.phis[other_idx, :, idx[1]],
                             self.phis[other_self_idx, :, idx[0]],
                             other.phis[other_other_idx, :, idx[1]],
                         )
@@ -137,10 +136,10 @@ class Binodal:
         self.chis = chis
         self.critical_points = critical_points
         self.binodal_sections: list[BinodalSection] = []
+        self.three_phase_polygons: list[shapely.Polygon] = None
         self._stepper = Stepper(chis)
         self._bipt_task_list: list[BinodalInitialPoint] = []
         self._bipt_hist: list[BinodalInitialPoint] = []
-        self._three_phase_points = []
 
     def _build_section(self, phi_init, v_init):
         """
@@ -168,7 +167,7 @@ class Binodal:
         self._bipt_hist.append(BinodalInitialPoint(phi_init, v_init))
         return True
 
-    def build(self):
+    def build(self, unstable_manifold: shapely.Polygon = None) -> None:
         """
         Build the binodal curve as a graph with nodes representing points (phi1a, phi2a, phi1b, phi2b) on the curve.
         Edges connect consecutive points along the curve. The graph is stored in self.binodal_graph.
@@ -190,7 +189,8 @@ class Binodal:
                 continue
             self._build_section(*bipt)
 
-        self._find_three_phase_points()
+        self._remove_unstable_sections(unstable_manifold)
+        self._find_phase_polygons()
 
     def _find_branching_points(
         self, section: BinodalSection
@@ -207,18 +207,123 @@ class Binodal:
 
         return branching_points
 
-    def _find_three_phase_points(self):
+    def _find_phase_polygons(self):
+        self._find_three_phase_polygons()
+        self._find_two_phase_polygons()
+
+    def _find_three_phase_polygons(self):
+        self.three_phase_polygons = []
         for i, section_a in enumerate(self.binodal_sections):
             for j, section_b in enumerate(self.binodal_sections):
                 if i >= j:
                     continue
                 i_points = section_a.intersects_with(section_b)
                 for i_point in i_points:
-                    self._three_phase_points.append(i_point)
+                    poly = shapely.Polygon(i_point)
+                    # Check if this three-phase point overlaps with any existing three-phase manifold
+                    # and if so, merge them into a single manifold
+                    polys_remove = []
+                    for tp_poly in self.three_phase_polygons:
+                        if poly.intersects(tp_poly):
+                            poly = shapely.make_valid(poly.union(tp_poly))
+                            polys_remove.append(tp_poly)
 
-    def plot(self, **kwargs):
+                    # Remove the merged manifold from the list
+                    for tp_poly in polys_remove:
+                        self.three_phase_polygons.remove(tp_poly)
+
+                    self.three_phase_polygons.append(poly)
+
+    def _find_two_phase_polygons(self):
+        if self.three_phase_polygons is None:
+            self._find_three_phase_polygons()
+
+        self.two_phase_polygons = []
+        for section in self.binodal_sections:
+            # Build a closed polygon: line_a forward, then line_b reversed
+            coords_a = np.asarray(section.line_a.coords)
+            coords_b = np.asarray(section.line_b.coords)
+            ring = np.concatenate([coords_a, coords_b[::-1]])
+            if len(ring) < 3:
+                continue
+            poly = shapely.make_valid(shapely.Polygon(ring))
+            if poly.area < 1e-6:
+                continue
+
+            # Subtract three-phase regions
+            for tp_poly in self.three_phase_polygons:
+                if poly.intersects(tp_poly):
+                    poly = shapely.make_valid(poly.difference(tp_poly))
+
+            if poly.area >= 1e-6:
+                polys_remove = []
+                for tp_poly in self.two_phase_polygons:
+                    if poly.intersects(tp_poly):
+                        poly = shapely.make_valid(poly.union(tp_poly))
+                        polys_remove.append(tp_poly)
+                for tp_poly in polys_remove:
+                    self.two_phase_polygons.remove(tp_poly)
+                self.two_phase_polygons.append(poly)
+
+    def _remove_unstable_sections(self, unstable_manifold: shapely.Polygon = None):
+        if unstable_manifold is None:
+            return
+        stable_sections = []
+        for section in self.binodal_sections:
+            # Vectorized containment check for both lines
+            inside_a = shapely.contains_xy(
+                unstable_manifold, section.phis[0, 0], section.phis[0, 1]
+            )
+            inside_b = shapely.contains_xy(
+                unstable_manifold, section.phis[1, 0], section.phis[1, 1]
+            )
+            stable_mask = ~(inside_a | inside_b)
+
+            if stable_mask.all():
+                stable_sections.append(section)
+                continue
+
+            # Find contiguous runs of stable vertices
+            stable_indices = np.where(stable_mask)[0]
+            if len(stable_indices) < 2:
+                continue
+            segments = np.split(
+                stable_indices, np.where(np.diff(stable_indices) > 1)[0] + 1
+            )
+            for seg in segments:
+                if len(seg) < 2:
+                    continue
+                stable_sections.append(
+                    BinodalSection(section.phis[:, :, seg], section.svs[seg])
+                )
+
+        self.binodal_sections = stable_sections
+
+    def plot_sections(self, **kwargs):
         for i, section in enumerate(self.binodal_sections):
             if i == 0:
                 section.plot(label="Binodal curve", **kwargs)
             else:
                 section.plot(**kwargs)
+
+    def plot_polygons(self, **kwargs):
+        if self.three_phase_polygons is None or self.two_phase_polygons is None:
+            self._find_phase_polygons()
+
+        for i, tp_poly in enumerate(self.three_phase_polygons):
+            x, y = tp_poly.exterior.xy
+            if i == 0:
+                plt.fill(
+                    x, y, color="blue", alpha=0.5, label="3-phase region", **kwargs
+                )
+            else:
+                plt.fill(x, y, color="blue", alpha=0.5, **kwargs)
+
+        for i, tp_poly in enumerate(self.two_phase_polygons):
+            x, y = tp_poly.exterior.xy
+            if i == 0:
+                plt.fill(
+                    x, y, color="orange", alpha=0.5, label="2-phase region", **kwargs
+                )
+            else:
+                plt.fill(x, y, color="orange", alpha=0.5, **kwargs)
