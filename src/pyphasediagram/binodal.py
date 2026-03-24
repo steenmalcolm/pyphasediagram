@@ -302,6 +302,83 @@ class Binodal:
 
         self.binodal_sections = stable_sections
 
+    def _free_energy(self, phi: np.ndarray) -> float:
+        """Compute the dimensionless free energy density for a composition [phi1, phi2]."""
+        phi_1, phi_2 = phi[0], phi[1]
+        phi_0 = 1.0 - phi_1 - phi_2
+        return (
+            phi_1 * np.log(phi_1)
+            + phi_2 * np.log(phi_2)
+            + phi_0 * np.log(phi_0)
+            + np.dot(phi, self.chis @ phi)
+        )
+
+    def tie_line_from_composition(self, phi_means: np.ndarray) -> np.ndarray | None:
+        """Given mean composition, return the compositions of coexisting phases along the tie line that passes through the mean composition.
+        This method considers all tie lines on which the mean composition lies and returns the one with the lowest free energy.
+
+        Parameters
+        ----------
+        phi_means : np.ndarray
+            Mean composition [phi1, phi2].
+
+        Returns
+        -------
+        np.ndarray or None
+            Shape (2, 2) array [[phi1_a, phi2_a], [phi1_b, phi2_b]] of the
+            coexisting phases, or None if no tie line passes through phi_means.
+        """
+        phi_means = np.asarray(phi_means, dtype=float)
+
+        best_tie_line = None
+        best_f = np.inf
+
+        for section in self.binodal_sections:
+            # phis shape: (2, 2, N) — [phase, component, index]
+            phi_a = section.phis[0]  # (2, N)
+            phi_b = section.phis[1]  # (2, N)
+
+            d = phi_b - phi_a  # (2, N)
+            diff = phi_means[:, None] - phi_a  # (2, N)
+
+            # Project phi_means onto each tie line: t = dot(diff, d) / dot(d, d)
+            num = np.sum(diff * d, axis=0)  # (N,)
+            den = np.sum(d * d, axis=0)  # (N,)
+
+            valid = den > 1e-20
+            if not np.any(valid):
+                continue
+
+            t = np.full(den.shape, np.nan)
+            t[valid] = num[valid] / den[valid]
+
+            # Distance from phi_means to its projection on each tie line segment
+            t_clamped = np.clip(t, 0.0, 1.0)
+            closest = phi_a + t_clamped[None, :] * d  # (2, N)
+            dist = np.linalg.norm(phi_means[:, None] - closest, axis=0)  # (N,)
+
+            # Only consider tie lines where phi_means is within the segment
+            candidates = valid & (t >= 0.0) & (t <= 1.0)
+            if not np.any(candidates):
+                continue
+
+            dist[~candidates] = np.inf
+            idx = int(np.argmin(dist))
+
+            if not np.isfinite(dist[idx]):
+                continue
+
+            # Interpolated free energy at phi_means on this tie line
+            alpha = t[idx]
+            f = (1.0 - alpha) * self._free_energy(phi_a[:, idx]) + alpha * self._free_energy(phi_b[:, idx])
+
+            if f < best_f:
+                best_f = f
+                best_tie_line = section.phis[:, :, idx]
+
+        return best_tie_line
+
+
     def plot_sections(self, **kwargs):
         for i, section in enumerate(self.binodal_sections):
             if i == 0:
