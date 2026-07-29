@@ -6,6 +6,8 @@ import shapely
 from pyphasediagram.point import BinodalInitialPoint, CriticalPoint
 from pyphasediagram.stepper import Stepper
 
+# TODO: Additional duplicate section removal after task list is exhausted and unstable manifold is removed.
+
 
 class BinodalSection:
 
@@ -31,12 +33,28 @@ class BinodalSection:
             )
 
     @staticmethod
-    def _closest_coord_index(coords: np.ndarray, point) -> int:
-        point_xy = np.array([point.x, point.y])
-        distances_sq = np.sum((coords - point_xy) ** 2, axis=1)
-        return int(np.argmin(distances_sq))
+    def _interpolate_on_segment(coords: np.ndarray, point) -> tuple[int, float]:
+        """Find the nearest line segment and return (seg_index, t).
 
-    def _intersection_indices(self, self_idx: int, other, other_idx: int):
+        ``seg_index`` is the start-vertex index of the closest segment and
+        ``t`` in [0, 1] is the interpolation parameter along that segment.
+        """
+        point_xy = np.array([point.x, point.y])
+        seg_starts = coords[:-1]
+        seg_vecs = coords[1:] - seg_starts
+        seg_lens_sq = np.sum(seg_vecs**2, axis=1)
+        seg_lens_sq = np.maximum(seg_lens_sq, 1e-30)
+        t = np.clip(
+            np.sum((point_xy - seg_starts) * seg_vecs, axis=1) / seg_lens_sq,
+            0.0,
+            1.0,
+        )
+        projections = seg_starts + t[:, np.newaxis] * seg_vecs
+        distances_sq = np.sum((projections - point_xy) ** 2, axis=1)
+        best = int(np.argmin(distances_sq))
+        return best, float(t[best])
+
+    def _intersection_params(self, self_idx: int, other, other_idx: int):
         line_1 = self._lines[self_idx]
         line_2 = other._lines[other_idx]
 
@@ -58,8 +76,8 @@ class BinodalSection:
         coords_2 = other._coords[other_idx]
         return [
             (
-                self._closest_coord_index(coords_1, point),
-                self._closest_coord_index(coords_2, point),
+                *self._interpolate_on_segment(coords_1, point),
+                *self._interpolate_on_segment(coords_2, point),
             )
             for point in points
         ]
@@ -76,15 +94,18 @@ class BinodalSection:
             other_self_idx = 1 - self_idx
             for other_idx, _ in enumerate(other._lines):
                 other_other_idx = 1 - other_idx
-                idxs = self._intersection_indices(self_idx, other, other_idx)
-                for idx in idxs:
-                    tp_points.append(
-                        (
-                            self.phis[self_idx, :, idx[0]],
-                            self.phis[other_self_idx, :, idx[0]],
-                            other.phis[other_other_idx, :, idx[1]],
-                        )
-                    )
+                params = self._intersection_params(self_idx, other, other_idx)
+                for seg1, t1, seg2, t2 in params:
+                    self_phi_a = (1 - t1) * self.phis[
+                        self_idx, :, seg1
+                    ] + t1 * self.phis[self_idx, :, seg1 + 1]
+                    self_phi_b = (1 - t1) * self.phis[
+                        other_self_idx, :, seg1
+                    ] + t1 * self.phis[other_self_idx, :, seg1 + 1]
+                    other_phi = (1 - t2) * other.phis[
+                        other_other_idx, :, seg2
+                    ] + t2 * other.phis[other_other_idx, :, seg2 + 1]
+                    tp_points.append((self_phi_a, self_phi_b, other_phi))
 
         return tp_points
 
@@ -154,6 +175,9 @@ class Binodal:
         #     for flag in flags:
         #         print(f"{flag}", end=", ")
         #     print()
+        # Edge case where section is too short
+        if phis.shape[-1] < 3:
+            return False
         bb_new = BinodalSection(phis, svs)
 
         # Avoid duplicates
@@ -192,7 +216,26 @@ class Binodal:
             self._build_section(*bipt)
 
         self._remove_unstable_sections(unstable_manifold)
+        self._remove_duplicate_sections()
         self._find_phase_polygons()
+
+    def _remove_duplicate_sections(self):
+        """Remove duplicate binodal sections where one is contained in another."""
+        unique_sections = []
+        duplicate_pair_idxs = []
+        for i, section in enumerate(self.binodal_sections):
+            is_duplicate = False
+            for j, other in enumerate(self.binodal_sections):
+                # Avoid removing both duplicates
+                if (j, i) in duplicate_pair_idxs:
+                    continue
+                if i != j and section.contained_in(other):
+                    is_duplicate = True
+                    duplicate_pair_idxs.append((i, j))
+                    break
+            if not is_duplicate:
+                unique_sections.append(section)
+        self.binodal_sections = unique_sections
 
     def _find_branching_points(
         self, section: BinodalSection
@@ -313,9 +356,10 @@ class Binodal:
             + np.dot(phi, self.chis @ phi)
         )
 
+    # TODO: Currently only the closest tie line is selected. It would be better to do an interpolation between the two closest tie lines
     def decomposition_from_composition(
         self, phi_means: np.ndarray
-    ) -> np.ndarray | None:
+    ) -> tuple[np.ndarray | None, float | None]:
         """Given mean composition, return the coexisting phase compositions that
         the system decomposes into.
 
@@ -331,10 +375,10 @@ class Binodal:
 
         Returns
         -------
-        np.ndarray or None
-            Shape ``(n_phases, 2)`` array of coexisting phase compositions,
-            where ``n_phases`` is 2 or 3.  Returns ``None`` if ``phi_means``
-            is in the single-phase region.
+        alt : np.ndarray or None
+            Coexisting phase compositions. Shape (2, 3) for three-phase, (2, 2) for two-phase, or None if no decomposition found.
+        f_alt : float or None
+            Free energy of the decomposition. None if no decomposition found.
         """
         phi_means = np.asarray(phi_means, dtype=float)
         pt = shapely.Point(phi_means)
@@ -343,7 +387,7 @@ class Binodal:
         best_f = np.inf
 
         # --- Three-phase candidates ---
-        if self.three_phase_polygons is not None:
+        if len(self.three_phase_polygons):
             for poly in self.three_phase_polygons:
                 if not poly.contains(pt):
                     continue
@@ -410,7 +454,10 @@ class Binodal:
                 best_f = f
                 best_result = section.phis[:, :, idx]
 
-        return best_result
+        if best_result is not None:
+            return best_result, best_f
+        else:
+            return None, None
 
     def plot_sections(self, **kwargs):
         for i, section in enumerate(self.binodal_sections):

@@ -1,9 +1,9 @@
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
 import shapely
 
-from pyphasediagram.spinodal import Spinodal
 from pyphasediagram.binodal import Binodal
+from pyphasediagram.spinodal import Spinodal
 
 
 class PhaseDiagram:
@@ -18,16 +18,17 @@ class PhaseDiagram:
 
     Parameters
     ----------
-    chi_dr : float
-        Flory–Huggins interaction parameter droplet–regulator
-    chi_rs : float
-        Flory–Huggins interaction parameter regulator–solvent
-    chi_ds : float
-        Flory–Huggins interaction parameter droplet–solvent
+    chi_01 : float
+        Flory–Huggins interaction parameter between component 0 and 1
+    chi_02 : float
+        Flory–Huggins interaction parameter between component 0 and 2
+    chi_12 : float
+        Flory–Huggins interaction parameter between component 1 and 2
 
     """
 
-    def __init__(self, chis):
+    def __init__(self, chis: np.ndarray):
+        chis = np.asarray(chis, dtype=float)
         if len(chis) == 3:
             chis = np.array(
                 [
@@ -49,7 +50,7 @@ class PhaseDiagram:
             phi_1 * np.log(phi_1)
             + phi_2 * np.log(phi_2)
             + phi_0 * np.log(phi_0)
-            + np.dot(phi, self.chis @ phi)
+            + np.sum(phi * (self.chis @ phi), axis=0) / 2
         )
         return f
 
@@ -65,33 +66,11 @@ class PhaseDiagram:
         """Given a mean composition, return the compositions of coexisting phases."""
         pass
 
-    def barycentric(self, phi_m: np.ndarray):
-        """
-        Compute (α, β, γ) such that phi_m = α phi^1 + β phi^2 + γ phi^3 and α+β+γ = 1.
-        """
-
-        if phi_m.ndim == 1:
-            alpha, beta, gamma = np.zeros((3, len(self._d)))
-        else:
-            alpha, beta, gamma = np.zeros((3, len(self._d), *phi_m.shape[1:]))
-
-        for i, ((p1, p2, p3), d) in enumerate(zip(self.three_phase_points, self._d)):
-            alpha[i] = (phi_m[0] - p3[0]) * (p2[1] - p3[1]) - (phi_m[1] - p3[1]) * (
-                p2[0] - p3[0]
-            )
-            alpha[i] /= d
-            beta[i] = (p1[0] - p3[0]) * (phi_m[1] - p3[1]) - (p1[1] - p3[1]) * (
-                phi_m[0] - p3[0]
-            )
-            beta[i] /= d
-            gamma[i] = 1 - alpha[i] - beta[i]
-
-        return alpha, beta, gamma
-
     def plot_phase_counts(self, ax=None):
         """Visualize the number of coexisting phases across the composition space."""
-        from matplotlib.patches import Polygon as MplPolygon, Patch
         from matplotlib.collections import PatchCollection
+        from matplotlib.patches import Patch
+        from matplotlib.patches import Polygon as MplPolygon
 
         if ax is None:
             fig, ax = plt.subplots()
@@ -239,6 +218,7 @@ class PhaseDiagram:
 
 if __name__ == "__main__":
     import signal
+
     from tqdm import tqdm
 
     class TimeoutError(Exception):

@@ -1,8 +1,10 @@
 from abc import ABC, abstractmethod
 
-import numpy as np
 import jax
 import jax.numpy as jnp
+import numpy as np
+
+# TODO: need a better way of checking if we are at the beginning of the run to avoid cycle termination too early.
 
 # Always use float64 with jax
 jax.config.update("jax_enable_x64", True)
@@ -329,4 +331,5 @@ class BaseStepper(ABC):
         n = phi_hist.shape[1]
         phis = np.transpose(phi_hist.reshape(-1, 2, n // 2), axes=(1, 2, 0))
 
+        return phis, svs, flags
         return phis, svs, flags

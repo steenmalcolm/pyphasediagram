@@ -16,6 +16,10 @@ class Spinodal:
 
     def __init__(self, chis: np.ndarray):
         """Initialize the Spinodal class with a 2x2 matrix of chi parameters. The spinodal curve will be computed based on these parameters. The graph structure to store the spinodal curve is initialized as an empty NetworkX graph, and a list to store critical points is also initialized."""
+        if chis.shape != (2, 2):
+            raise ValueError(
+                f"Expected chis to be a 2x2 matrix, but got shape {chis.shape}"
+            )
         self.chis = chis
         self.spinodal_graph = nx.Graph()
         self.node_id = 0
@@ -46,6 +50,17 @@ class Spinodal:
         p = (2 * phi * c - a - phi * (1 - phi) * det) / (a + det * phi)
         q = (1 + phi * (1 - phi) * b) / (a + det * phi)
         return p, q
+
+    def get_spinodal_coords(self) -> tuple[list[np.ndarray], list[np.ndarray]]:
+        """Return the coordinates of the spinodal curve as two lists: phi1s and phi2s."""
+        phi1s, phi2s = [], []
+        for comp in nx.connected_components(self.spinodal_graph):
+            sg = self.spinodal_graph.subgraph(comp)
+            phi1, phi2 = self._coords_from_subgraph(sg)
+            mask = self._in_domain(phi1, phi2)
+            phi1s.append(phi1[mask])
+            phi2s.append(phi2[mask])
+        return phi1s, phi2s
 
     def phi2_from_phi1(self, phi1):
         """Given phi1, compute the two possible phi2 values from the quadratic formula."""
@@ -102,15 +117,18 @@ class Spinodal:
 
         # Edge case where pole of p and q is resolved
         for pole_idx in np.where(np.isinf(p) | np.isinf(q))[0]:
-            discriminant[pole_idx] = discriminant[pole_idx - 1]
+            if pole_idx == 0:
+                discriminant[pole_idx] = discriminant[pole_idx + 1]
+            else:
+                discriminant[pole_idx] = discriminant[pole_idx - 1]
 
         roots_idx = np.where(np.diff(np.sign(discriminant)))[0]
 
         # Check if discriminant is positive at the endpoints and add them to the roots if so, since the spinodal branches can start/end at the domain boundaries
         if discriminant[0] > 0:
             roots_idx = np.r_[0, roots_idx]
-        if discriminant[-1] > 0:
-            roots_idx = np.r_[roots_idx, -1]
+        if discriminant[-1] >= 0:
+            roots_idx = np.r_[roots_idx, len(phi1_vals) - 1]
         # Add 1 at beginning of domain so the discriminant is positive
         roots_idx[::2] += 1
         return phi1_vals[roots_idx]

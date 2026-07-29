@@ -148,7 +148,7 @@ if __name__ == "__main__":
             [[0, chi_01, chi_02], [chi_01, 0, chi_12], [chi_02, chi_12, 0]]
         )
         if phi_init is not None:
-            phi_means = [0, phi_initw[::2].mean(), phi_init[1::2].mean()]
+            phi_means = [0, phi_init[::2].mean(), phi_init[1::2].mean()]
         else:
             phi_means = [0, 1e-3, 0.5]
         phi_means[0] = 1 - phi_means[1] - phi_means[2]
@@ -165,4 +165,5 @@ if __name__ == "__main__":
             )
 
     import matplotlib.pyplot as plt
+
     plt.plot(phi_init[::2], phi_init[1::2])
