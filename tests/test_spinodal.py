@@ -521,10 +521,6 @@ def test_build_polygons_handles_endpoints_near_simplex_corners(simple_chis):
     assert isinstance(spinodal.polygons, list)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="build appends to the existing graph and critical-point collection",
-)
 def test_build_replaces_previous_state(monkeypatch, simple_chis):
     """Calling build twice should not duplicate previously calculated state."""
     spinodal = Spinodal(simple_chis)
@@ -597,10 +593,6 @@ def test_find_critical_points_deduplicates_exact_sampled_root(
     assert spinodal.critical_points[0].phi2 == pytest.approx(0.2)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="large negative interpolation residuals do not emit a warning",
-)
 def test_find_critical_points_warns_for_large_magnitude_interpolation_residual(
     monkeypatch, simple_chis, trivial_spinodal_graph
 ):
@@ -624,10 +616,6 @@ def test_find_critical_points_warns_for_large_magnitude_interpolation_residual(
         spinodal._find_critical_points()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="the vertical-angle check divides by a zero displacement component",
-)
 def test_build_polygons_avoids_division_by_zero_for_horizontal_tangent(simple_chis):
     """A horizontal endpoint tangent should be handled without floating errors."""
     spinodal = Spinodal(simple_chis)
@@ -642,10 +630,6 @@ def test_build_polygons_avoids_division_by_zero_for_horizontal_tangent(simple_ch
         spinodal._build_polygons()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="plot reports that NaN branches are skipped but still plots them",
-)
 def test_plot_skips_components_containing_nan(monkeypatch, simple_chis):
     """No plotted spinodal branch should contain a NaN coordinate."""
     import matplotlib.pyplot as plt

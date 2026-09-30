@@ -7,6 +7,7 @@ locates critical points, and constructs polygons used to identify the
 locally unstable region.
 """
 
+import warnings
 from typing import Optional
 
 import matplotlib.pyplot as plt
@@ -98,9 +99,15 @@ class Spinodal:
         The build pipeline samples the analytic branches, clips them to the
         physically admissible domain, connects nearby branches, locates
         critical points, and constructs polygons which contain the locally stable regions in composition space.
-        Existing graph nodes and critical points are not cleared, so a ``Spinodal``
-        instance should normally be built only once.
+        Existing graph nodes, critical points, and polygons are cleared before
+        rebuilding, so repeated calls replace rather than append to the
+        calculated state.
         """
+        self.spinodal_graph = nx.Graph()
+        self.node_id = 0
+        self.critical_points = []
+        self.polygons = None
+
         phi1_domains = self._spinodal_domains()
         for i in range(0, len(phi1_domains), 2):
             self._domain_data(phi1_domains[i], phi1_domains[i + 1], num_points)
@@ -619,9 +626,13 @@ class Spinodal:
                 phi1_c = np.interp(0, xp[o], phi1p[o])
                 phi2_c = np.interp(0, xp[o], phi2p[o])
                 td_c = self._third_derivative(phi1_c, phi2_c)
-                if td_c > 1e-2:
-                    Warning(
-                        f"Third derivative at critical point ({phi1_c:.2f}, {phi2_c:.2f}) is quite large: {td_c:.5f}.\nTry increasing resolution of spinodal curve."
+                if abs(td_c) > 1e-2:
+                    warnings.warn(
+                        f"Third derivative at critical point ({phi1_c:.2f}, "
+                        f"{phi2_c:.2f}) is quite large: {td_c:.5f}.\n"
+                        "Try increasing resolution of spinodal curve.",
+                        RuntimeWarning,
+                        stacklevel=2,
                     )
                 if abs(td_c) >= np.std(xp):
                     raise RuntimeError(
@@ -674,8 +685,9 @@ class Spinodal:
                         # Edge case where displacement between e and its neighbor is vertical, such that the resolution is quite bad
                         nb = next(sg.neighbors(e))
                         d = e - nb
+                        angle_from_vertical = np.arctan2(abs(d[0]), abs(d[1]))
                         if (
-                            abs(np.arctan(d[0] / d[1])) < 0.01
+                            angle_from_vertical < 0.01
                         ):  # if angle with vertical is less than 0.01 radians (~0.57 degrees)
                             if d[1] < 0:
 
@@ -795,15 +807,18 @@ class Spinodal:
             r"$(\chi_{11}, \chi_{22}, \chi_{12})$ = " + f"({a:.5f}, {b:.5f}, {c:.5f})"
         )
         ls = kwargs.get("linestyle", "--")
-        for i, comp in enumerate(nx.connected_components(self.spinodal_graph)):
+        has_plotted_spinodal = False
+        for comp in nx.connected_components(self.spinodal_graph):
             sg = self.spinodal_graph.subgraph(comp)
 
             # Find endpoint (degree 1) if it exists (path case)
             phi1s, phi2s = self._coords_from_subgraph(sg)
-            if np.isnan(phi2s).any():
-                print("NaN values found in ys, skipping plot for this component.")
-            if i == 0:
+            if np.isnan(phi1s).any() or np.isnan(phi2s).any():
+                print("NaN coordinates found, skipping plot for this component.")
+                continue
+            if not has_plotted_spinodal:
                 plt.plot(phi1s, phi2s, label="Spinodal curve", linestyle=ls)
+                has_plotted_spinodal = True
             else:
                 plt.plot(phi1s, phi2s, linestyle=ls)
 
