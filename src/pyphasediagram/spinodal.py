@@ -1,3 +1,12 @@
+"""Construct and analyze spinodal curves for ternary mixtures.
+
+The spinodal is represented as an undirected graph of points in the two
+independent composition coordinates ``(phi1, phi2)``. This module samples the
+analytic spinodal branches, connects and clips them to the physically admissible domain,
+locates critical points, and constructs polygons used to identify the
+locally unstable region.
+"""
+
 from typing import Optional
 
 import matplotlib.pyplot as plt
@@ -11,11 +20,48 @@ from pyphasediagram.point import CriticalPoint, SpinodalPoint
 
 
 class Spinodal:
+    """Represent the spinodal curve of a ternary mixture.
+
+    Parameters
+    ----------
+    chis : numpy.ndarray
+        Reduced interaction matrix with shape ``(2, 2)`` for the two
+        independent composition coordinates.
+
+    Attributes
+    ----------
+    DOMAIN_CORNERS : list of tuple
+        Vertices ``[(0, 0), (0, 1), (1, 0)]`` of the closed composition
+        simplex.
+    chis : numpy.ndarray
+        Reduced interaction matrix with shape ``(2, 2)``.
+    spinodal_graph : networkx.Graph
+        Graph whose nodes are
+        :class:`~pyphasediagram.point.SpinodalPoint` objects and whose edges
+        follow sampled spinodal branches.
+    node_id : int
+        Used to assign a unique ID to graph nodes.
+    critical_points : list of CriticalPoint
+        Critical points detected on the spinodal branches.
+    polygons : list of shapely.geometry.Polygon or None
+        Locally stable regions bounded by the spinodal curves. ``None`` until
+        polygon construction has run.
+
+    Raises
+    ------
+    ValueError
+        If ``chis`` does not have shape ``(2, 2)``.
+
+    Notes
+    -----
+    Physical compositions lie in the open simplex ``phi1 > 0``, ``phi2 > 0``,
+    and ``phi1 + phi2 < 1``. The dependent composition is
+    ``phi0 = 1 - phi1 - phi2``.
+    """
 
     DOMAIN_CORNERS = [(0, 0), (0, 1), (1, 0)]
 
     def __init__(self, chis: np.ndarray):
-        """Initialize the Spinodal class with a 2x2 matrix of chi parameters. The spinodal curve will be computed based on these parameters. The graph structure to store the spinodal curve is initialized as an empty NetworkX graph, and a list to store critical points is also initialized."""
         if chis.shape != (2, 2):
             raise ValueError(
                 f"Expected chis to be a 2x2 matrix, but got shape {chis.shape}"
@@ -27,9 +73,34 @@ class Spinodal:
         self.polygons: list[shapely.geometry.Polygon] = None
 
     def build(self, num_points=10000):
-        """
-        Build the spinodal curve as a graph with nodes representing points (phi1, phi2) on the curve.
-        Edges connect consecutive points along the curve. The graph is stored in self.spinodal_graph.
+        """Build the spinodal graph and derived geometric objects.
+
+        Parameters
+        ----------
+        num_points : int, optional
+            Number of ``phi1`` samples used for each discriminant-positive
+            interval and for each of its two analytic branches.
+
+        Returns
+        -------
+        None
+
+        Raises
+        ------
+        ValueError
+            If critical-point detection encounters a ``NaN`` third
+            derivative.
+        RuntimeError
+            If interpolation does not locate a sufficiently accurate root of
+            the third derivative.
+
+        Notes
+        -----
+        The build pipeline samples the analytic branches, clips them to the
+        open composition simplex, connects nearby continuations, locates
+        critical points, and constructs locally stable polygons. Existing
+        graph nodes and critical points are not cleared, so a ``Spinodal``
+        instance should normally be built only once.
         """
         phi1_domains = self._spinodal_domains()
         for i in range(0, len(phi1_domains), 2):
@@ -40,8 +111,27 @@ class Spinodal:
         self._build_polygons()
 
     def _get_p_q(self, phi, is_calculate_phi2=True):
-        """
-        Compute the coefficients p and q of the quadratic equation for phi1/phi2 given phi2/phi1.
+        """Calculate coefficients of the quadratic spinodal equation.
+
+        Parameters
+        ----------
+        phi : float or array-like
+            Known independent composition coordinate.
+        is_calculate_phi2 : bool, optional
+            If ``True``, calculate coefficients for ``phi2`` given ``phi1``.
+            If ``False``, calculate coefficients for ``phi1`` given ``phi2``.
+
+        Returns
+        -------
+        p : float or numpy.ndarray
+            Linear coefficient of ``x**2 + p*x - q = 0``.
+        q : float or numpy.ndarray
+            Negated constant coefficient of ``x**2 + p*x - q = 0``.
+
+        Notes
+        -----
+        Outputs follow the scalar or broadcast array shape of ``phi``. Poles
+        can occur where the common denominator of the coefficients vanishes.
         """
         a, b, c = self.chis[1, 1], self.chis[0, 0], self.chis[0, 1]
         if is_calculate_phi2 == False:
@@ -52,7 +142,21 @@ class Spinodal:
         return p, q
 
     def get_spinodal_coords(self) -> tuple[list[np.ndarray], list[np.ndarray]]:
-        """Return the coordinates of the spinodal curve as two lists: phi1s and phi2s."""
+        """Return ordered coordinates for every connected spinodal branch.
+
+        Returns
+        -------
+        phi1s : list of numpy.ndarray
+            First composition coordinates, one array per connected component.
+        phi2s : list of numpy.ndarray
+            Second composition coordinates corresponding elementwise to
+            ``phi1s``.
+
+        Notes
+        -----
+        Coordinates outside the open composition simplex are excluded. Both
+        lists are empty when the graph has no components.
+        """
         phi1s, phi2s = [], []
         for comp in nx.connected_components(self.spinodal_graph):
             sg = self.spinodal_graph.subgraph(comp)
@@ -63,14 +167,54 @@ class Spinodal:
         return phi1s, phi2s
 
     def phi2_from_phi1(self, phi1):
-        """Given phi1, compute the two possible phi2 values from the quadratic formula."""
+        """Calculate both analytic spinodal branches at specified ``phi1``.
+
+        Parameters
+        ----------
+        phi1 : float or array-like
+            First independent composition coordinate.
+
+        Returns
+        -------
+        phi2_upper : float or numpy.ndarray
+            Solution obtained with the positive square-root branch.
+        phi2_lower : float or numpy.ndarray
+            Solution obtained with the negative square-root branch.
+
+        Notes
+        -----
+        Output shapes follow ``phi1``. Inputs for which the quadratic
+        discriminant is negative produce ``NaN`` values.
+        """
         p, q = self._get_p_q(phi1)
         discriminant = p**2 / 4 + q
 
         return -p / 2 + np.sqrt(discriminant), -p / 2 - np.sqrt(discriminant)
 
     def eigenvalues_from_phi(self, phi1, phi2):
-        """Given phi1 and phi2, compute the eigenvalues of the Hessian matrix of the free energy."""
+        """Calculate the free-energy Hessian eigenvalues at compositions.
+
+        Parameters
+        ----------
+        phi1 : float or array-like
+            First independent composition coordinate.
+        phi2 : float or array-like
+            Second independent composition coordinate, broadcast-compatible
+            with ``phi1``.
+
+        Returns
+        -------
+        eigenvalue_max : float or numpy.ndarray
+            Larger eigenvalue of the ``2 x 2`` free-energy Hessian.
+        eigenvalue_min : float or numpy.ndarray
+            Smaller eigenvalue of the ``2 x 2`` free-energy Hessian.
+
+        Notes
+        -----
+        The calculation assumes an interior composition with positive
+        ``phi1``, ``phi2``, and ``phi0 = 1 - phi1 - phi2``. Boundary values
+        lead to divisions by zero.
+        """
         phi0 = 1 - phi1 - phi2
         H_11 = 1 / phi1 + 1 / phi0 + self.chis[0, 0]
         H_22 = 1 / phi2 + 1 / phi0 + self.chis[1, 1]
@@ -85,9 +229,26 @@ class Spinodal:
         return eigenvalue1, eigenvalue2
 
     def _domain_data(self, phi1_i, phi1_f, num_points=5000):
-        """
-        Compute the spinodal branches for phi1 in [phi1_i, phi1_f]
-        and add them to the graph as nodes with attributes phi1, phi2, and pos=(phi1, phi2).
+        """Sample two spinodal branches over a ``phi1`` interval.
+
+        Parameters
+        ----------
+        phi1_i : float
+            Inclusive lower endpoint of the sampling interval.
+        phi1_f : float
+            Inclusive upper endpoint of the sampling interval.
+        num_points : int, optional
+            Number of samples on each analytic branch.
+
+        Returns
+        -------
+        None
+
+        Notes
+        -----
+        Two path components are appended to :attr:`spinodal_graph`, including
+        points that may subsequently be removed by :meth:`_clip_to_domain`.
+        Node identifiers are assigned sequentially through :attr:`node_id`.
         """
         phi1_vals = np.linspace(phi1_i, phi1_f, num_points)
         phi2_branches = self.phi2_from_phi1(phi1_vals)
@@ -106,9 +267,21 @@ class Spinodal:
                 self.node_id += 1
 
     def _spinodal_domains(self):
-        """
-        Find phi values where the discriminant of the quadratic equation for phi2 changes sign.
-        These are the phi1 coordinates where the spinodal branches start/end
+        """Find intervals with real analytic spinodal solutions.
+
+        Returns
+        -------
+        numpy.ndarray
+            Ordered ``phi1`` endpoints with shape ``(2*k,)``. Consecutive
+            pairs delimit intervals where the quadratic discriminant is
+            nonnegative.
+
+        Notes
+        -----
+        The discriminant is sampled at 100,000 evenly spaced points on
+        ``[0, 1]``. Sign changes are therefore located to the resolution of
+        that grid rather than by a continuous root solver. Poles in the
+        quadratic coefficients are replaced locally with a neighboring value.
         """
         phi1_vals = np.linspace(0, 1, 100000)
 
@@ -135,17 +308,38 @@ class Spinodal:
 
     @classmethod
     def _in_domain(cls, phi1, phi2):
-        """Check if the points (phi1, phi2) are inside the open triangular domain defined by DOMAIN_CORNERS.
-        Returns a boolean array (or scalar) that is True where (phi1 > 0, phi2 > 0, phi1 + phi2 < 1).
+        """Check whether compositions lie in the open ternary simplex.
+
+        Parameters
+        ----------
+        phi1 : float or array-like
+            First independent composition coordinate.
+        phi2 : float or array-like
+            Second independent composition coordinate, broadcast-compatible
+            with ``phi1``.
+
+        Returns
+        -------
+        bool or numpy.ndarray
+            ``True`` where ``phi1 > 0``, ``phi2 > 0``, and
+            ``phi1 + phi2 < 1``. Boundary points are excluded.
         """
         phi1 = np.asarray(phi1)
         phi2 = np.asarray(phi2)
         return (phi1 > 0) & (phi2 > 0) & (phi1 + phi2 < 1)
 
     def _clip_to_domain(self):
-        """
-        Remove nodes whose (phi1, phi2) lie outside the correct domain
-        Mutates and returns G for convenience.
+        """Remove graph nodes outside the physical composition domain.
+
+        Returns
+        -------
+        None
+
+        Notes
+        -----
+        This method mutates :attr:`spinodal_graph`. After removing points
+        outside the open simplex, it also removes connected components that
+        contain only one node.
         """
         if self.spinodal_graph.number_of_nodes() == 0:
             return
@@ -163,7 +357,19 @@ class Spinodal:
                 self.spinodal_graph.remove_node(next(iter(comp)))
 
     def _connect_branches(self):
-        """Connect disjoint branches of the spinodal curve by adding edges between closest endpoints (degree 1 nodes) of different components if they are within a certain distance threshold"""
+        """Join nearby graph endpoints that form a smooth continuation.
+
+        Returns
+        -------
+        None
+
+        Notes
+        -----
+        Endpoints less than ``0.05`` apart are connected when each endpoint
+        lies approximately between the other endpoint and its own neighbor.
+        Connections are chosen greedily, and each endpoint is used at most
+        once during a call.
+        """
 
         # TODO: Check if minimum bounding squares of subgraphs overlap before computing pairwise distances to speed up for large graphs
         if self.spinodal_graph.number_of_nodes() == 0:
@@ -199,9 +405,26 @@ class Spinodal:
                         invalid_endpoints.extend([epti, eptj])
 
     def _coords_from_subgraph(self, sg):
-        """
-        Extract phi1 and phi2 coordinates from a subgraph's nodes. In the correct order.
-        Returns two lists: phi1s and phi2s.
+        """Extract graph coordinates in traversal order.
+
+        Parameters
+        ----------
+        sg : networkx.Graph
+            Connected spinodal subgraph representing a path or cycle.
+
+        Returns
+        -------
+        phi1 : numpy.ndarray
+            First composition coordinates with shape ``(n_nodes,)``.
+        phi2 : numpy.ndarray
+            Corresponding second composition coordinates with shape
+            ``(n_nodes,)``.
+
+        Notes
+        -----
+        Traversal starts at an arbitrary endpoint for a path and at an
+        arbitrary node for a cycle. Depth-first preorder then determines the
+        orientation of the returned coordinates.
         """
         # Find endpoint (degree 1) if it exists (path case)
         endpoints = [n for n, d in sg.degree() if d == 1]
@@ -219,12 +442,54 @@ class Spinodal:
         return phi1s, phi2s
 
     def _third_derivative(self, phi1, phi2):
+        """Evaluate the third-derivative criticality condition.
+
+        Parameters
+        ----------
+        phi1 : float or array-like
+            First independent composition coordinate.
+        phi2 : float or array-like
+            Second independent composition coordinate, broadcast-compatible
+            with ``phi1``.
+
+        Returns
+        -------
+        float or numpy.ndarray
+            Criticality scalar with the broadcast shape of the inputs. Its
+            zeros along a spinodal branch identify candidate critical points.
+
+        Notes
+        -----
+        Inputs must lie in the open composition simplex to avoid singular
+        denominators.
+        """
         phi0 = 1 - phi1 - phi2
         H_11 = 1 / phi1 + 1 / phi0 + self.chis[0, 0]
         H_12 = 1 / phi0 + self.chis[0, 1]
         return H_12**3 / (phi1**2) - H_11**3 / (phi2**2) + (H_11 - H_12) ** 3 / phi0**2
 
     def _find_critical_points(self):
+        """Locate and store critical points on every spinodal branch.
+
+        Returns
+        -------
+        None
+
+        Raises
+        ------
+        ValueError
+            If the third-derivative values contain ``NaN``.
+        RuntimeError
+            If an interpolated sign-change root is not sufficiently close to
+            zero relative to its neighboring samples.
+
+        Notes
+        -----
+        Candidates are obtained both from sign changes and from local extrema
+        whose absolute value is below ``1e-4``. Sign-change roots are linearly
+        interpolated in both composition coordinates. Results are appended to
+        :attr:`critical_points`; the existing list is not cleared.
+        """
         for comp in nx.connected_components(self.spinodal_graph):
 
             sg = self.spinodal_graph.subgraph(comp)
@@ -277,7 +542,24 @@ class Spinodal:
                 )
 
     def _build_polygons(self):
-        """Build shapely polygons for the spinodal curve components to facilitate point-in-spinodal checks"""
+        """Construct locally stable polygons from spinodal graph components.
+
+        Returns
+        -------
+        None
+
+        Notes
+        -----
+        Open branches are extended to nearby simplex boundaries and, when
+        necessary, through a simplex corner. Candidate polygons are classified
+        from the Hessian eigenvalues at their centroids; polygons enclosing a
+        locally unstable centroid are complemented against the full simplex.
+        Overlapping stable polygons are intersected. The resulting geometries
+        replace :attr:`polygons`.
+
+        Components with fewer than three coordinates or an invalid polygon
+        emit a message and are skipped.
+        """
         self.polygons = []
 
         # If needed, store which corner to add to which endpoint
@@ -372,7 +654,20 @@ class Spinodal:
                 )
 
     def get_unstable_manifold(self) -> Optional[shapely.geometry.Polygon]:
-        """Return a shapely polygon representing the locally unstable region of the phase diagram, which is the union of the polygons formed by the spinodal curve components."""
+        """Return the locally unstable region of the composition simplex.
+
+        Returns
+        -------
+        shapely.geometry.Polygon or shapely.geometry.MultiPolygon or None
+            Full composition simplex with every locally stable polygon
+            removed. ``None`` is returned when no stable polygons exist.
+
+        Raises
+        ------
+        ValueError
+            If polygons have not yet been constructed. Call :meth:`build`
+            first.
+        """
         if self.polygons is None:
             raise ValueError(
                 "Polygons have not been built yet. Call _build_polygons() first."
@@ -385,6 +680,24 @@ class Spinodal:
         return polygon
 
     def plot(self, **kwargs):
+        """Plot spinodal branches and critical points on the current axes.
+
+        Parameters
+        ----------
+        **kwargs
+            Plot options. The ``linestyle`` entry is applied to spinodal
+            branches and defaults to ``"--"``; other entries are currently
+            ignored.
+
+        Returns
+        -------
+        None
+
+        Notes
+        -----
+        The method sets the title, axis limits, labels, legend, and the
+        ``phi1 + phi2 = 1`` boundary on the current Matplotlib axes.
+        """
         a, b, c = self.chis[0, 0], self.chis[1, 1], self.chis[0, 1]
         plt.title(
             r"$(\chi_{11}, \chi_{22}, \chi_{12})$ = " + f"({a:.5f}, {b:.5f}, {c:.5f})"
