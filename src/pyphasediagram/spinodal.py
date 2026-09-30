@@ -54,8 +54,8 @@ class Spinodal:
 
     Notes
     -----
-    Physical compositions lie in the open simplex ``phi1 > 0``, ``phi2 > 0``,
-    and ``phi1 + phi2 < 1``. The dependent composition is
+    Compositions lie in the open domain ``phi1 > 0``, ``phi2 > 0``,
+    and ``phi1 + phi2 < 1``. The solvent composition is
     ``phi0 = 1 - phi1 - phi2``.
     """
 
@@ -78,8 +78,7 @@ class Spinodal:
         Parameters
         ----------
         num_points : int, optional
-            Number of ``phi1`` samples used for each discriminant-positive
-            interval and for each of its two analytic branches.
+            Number of ``phi1`` samples used each domain interval.
 
         Returns
         -------
@@ -97,9 +96,9 @@ class Spinodal:
         Notes
         -----
         The build pipeline samples the analytic branches, clips them to the
-        open composition simplex, connects nearby continuations, locates
-        critical points, and constructs locally stable polygons. Existing
-        graph nodes and critical points are not cleared, so a ``Spinodal``
+        physically admissible domain, connects nearby branches, locates
+        critical points, and constructs polygons which contain the locally stable regions in composition space.
+        Existing graph nodes and critical points are not cleared, so a ``Spinodal``
         instance should normally be built only once.
         """
         phi1_domains = self._spinodal_domains()
@@ -154,7 +153,7 @@ class Spinodal:
 
         Notes
         -----
-        Coordinates outside the open composition simplex are excluded. Both
+        Coordinates outside the admissible domain are excluded. Both
         lists are empty when the graph has no components.
         """
         phi1s, phi2s = [], []
@@ -166,7 +165,7 @@ class Spinodal:
             phi2s.append(phi2[mask])
         return phi1s, phi2s
 
-    def phi2_from_phi1(self, phi1):
+    def _phi2_from_phi1(self, phi1):
         """Calculate both analytic spinodal branches at specified ``phi1``.
 
         Parameters
@@ -251,7 +250,7 @@ class Spinodal:
         Node identifiers are assigned sequentially through :attr:`node_id`.
         """
         phi1_vals = np.linspace(phi1_i, phi1_f, num_points)
-        phi2_branches = self.phi2_from_phi1(phi1_vals)
+        phi2_branches = self._phi2_from_phi1(phi1_vals)
 
         # Iterate over both branches
         for phi2_vals in phi2_branches:
@@ -308,7 +307,7 @@ class Spinodal:
 
     @classmethod
     def _in_domain(cls, phi1, phi2):
-        """Check whether compositions lie in the open ternary simplex.
+        """Check whether compositions lie in the open ternary domain.
 
         Parameters
         ----------
@@ -338,7 +337,7 @@ class Spinodal:
         Notes
         -----
         This method mutates :attr:`spinodal_graph`. After removing points
-        outside the open simplex, it also removes connected components that
+        outside the admissible domain, it also removes connected components that
         contain only one node.
         """
         if self.spinodal_graph.number_of_nodes() == 0:
@@ -449,8 +448,7 @@ class Spinodal:
         phi1 : float or array-like
             First independent composition coordinate.
         phi2 : float or array-like
-            Second independent composition coordinate, broadcast-compatible
-            with ``phi1``.
+            Second independent composition coordinate, with the same shape as ``phi1``.
 
         Returns
         -------
@@ -460,7 +458,7 @@ class Spinodal:
 
         Notes
         -----
-        Inputs must lie in the open composition simplex to avoid singular
+        Inputs must lie in the admissible composition domain to avoid singular
         denominators.
         """
         phi0 = 1 - phi1 - phi2
@@ -550,7 +548,7 @@ class Spinodal:
 
         Notes
         -----
-        Open branches are extended to nearby simplex boundaries and, when
+        Open branches are extended to nearby admissible domain boundaries and, when
         necessary, through a simplex corner. Candidate polygons are classified
         from the Hessian eigenvalues at their centroids; polygons enclosing a
         locally unstable centroid are complemented against the full simplex.
@@ -659,7 +657,7 @@ class Spinodal:
         Returns
         -------
         shapely.geometry.Polygon or shapely.geometry.MultiPolygon or None
-            Full composition simplex with every locally stable polygon
+            Full composition space with every locally stable polygon
             removed. ``None`` is returned when no stable polygons exist.
 
         Raises

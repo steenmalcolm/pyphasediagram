@@ -106,7 +106,7 @@ def test_phi2_from_phi1_vector_shapes(simple_chis):
     sp = Spinodal(simple_chis)
     phi1 = np.linspace(0.0, 1.0, 11)
 
-    phi2a, phi2b = sp.phi2_from_phi1(phi1)
+    phi2a, phi2b = sp._phi2_from_phi1(phi1)
 
     assert phi2a.shape == phi1.shape
     assert phi2b.shape == phi1.shape
@@ -114,7 +114,7 @@ def test_phi2_from_phi1_vector_shapes(simple_chis):
 
 def test_phi2_from_phi1_scalar_returns_scalar_like(simple_chis):
     sp = Spinodal(simple_chis)
-    phi2a, phi2b = sp.phi2_from_phi1(0.1)
+    phi2a, phi2b = sp._phi2_from_phi1(0.1)
     # numpy scalar or python float is fine; ensure it's not an array with wrong shape
     assert np.isscalar(phi2a) or (isinstance(phi2a, np.ndarray) and phi2a.shape == ())
     assert np.isscalar(phi2b) or (isinstance(phi2b, np.ndarray) and phi2b.shape == ())
