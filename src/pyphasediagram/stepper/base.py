@@ -1,3 +1,13 @@
+"""JAX-based predictor-corrector tracing for coexistence curves.
+
+This module defines the abstract numerical machinery used to trace a
+one-dimensional solution manifold ``residual(phi) = 0``.  It also defines the
+bit flags returned when tracing reaches a numerical or geometric stopping
+condition.
+
+Importing the module enables 64-bit floating-point calculations in JAX.
+"""
+
 from abc import ABC, abstractmethod
 
 import jax
@@ -18,12 +28,38 @@ STATUS_CYCLED = jnp.int32(1 << 4)  # Cycled back to initial point
 
 
 class BaseStepper(ABC):
-    """
-    Base class for numerical tracing of a coexistence curve res(phi)=0 (M=N-1).
-    Subclasses must implement: residual(phi), phi_init(), is_terminate(phi).
+    """Trace a one-dimensional implicit curve with predictor--corrector steps.
+
+    For a state vector with ``n`` entries, subclasses define an ``n - 1``
+    dimensional residual.  The residual Jacobian therefore has a
+    one-dimensional null space whose direction is used as the tangent to
+    the curve.  Each predicted point is projected back onto the zero-residual
+    manifold with a regularized Newton update.
+
+    Subclasses must implement :meth:`residual` and :meth:`is_terminate` using
+    JAX-compatible operations.
+
+    Attributes
+    ----------
+    MAX_STEPS : int
+        Maximum number of predictor--corrector steps in one trace.
+
+    CYCLE_MIN_STEPS : int
+        Minimum number of steps before returning to the initial point is
+        treated as a completed cycle. This prevents premature cycle termination.
+    CYCLE_INIT_TOL : float
+        Euclidean-distance tolerance used to detect a return to the initial
+        point.
+
+    Notes
+    -----
+    Construction creates JIT-compiled residual, Jacobian, singular-value
+    decomposition, and tracing-loop callables.  Implementations of abstract
+    methods must consequently avoid Python-side control flow that depends on
+    traced values.
     """
 
-    MAX_STEPS = 1e5
+    MAX_STEPS: int = int(1e50)
 
     # terminate once we are back at the initial point within tolerance
     CYCLE_MIN_STEPS = 10  # don't trigger immediately
@@ -43,28 +79,119 @@ class BaseStepper(ABC):
 
     @abstractmethod
     def residual(self, phi: jnp.ndarray) -> jnp.ndarray:
-        """Return chemical potential and osmotic pressure differences between phases."""
+        """Evaluate the constraints defining the implicit curve.
+
+        Parameters
+        ----------
+        phi : jax.Array
+            State vector with shape ``(n,)``.
+
+        Returns
+        -------
+        jax.Array
+            Residual vector with shape ``(n - 1,)``. The target manifold is
+            defined by all entries being zero.
+
+        Notes
+        -----
+        Implementations must be differentiable by JAX and compatible with
+        :func:`jax.jit`.
+        """
 
     @abstractmethod
     def is_terminate(self, phi: jnp.ndarray) -> jnp.ndarray:
-        """Return True if stepping should terminate at given phi."""
+        """Determine whether tracing should stop at a state.
+
+        Parameters
+        ----------
+        phi : jax.Array
+            State vector with shape ``(n,)``.
+
+        Returns
+        -------
+        jax.Array
+            Scalar Boolean array that is ``True`` when tracing should stop.
+
+        Notes
+        -----
+        Implementations must use JAX-compatible operations because this method
+        is evaluated inside the JIT-compiled tracing loop.
+        """
         # IMPORTANT: to be fully jittable, subclasses must implement this using JAX ops
         # and return a scalar boolean-like jnp.ndarray (dtype=bool).
 
     def _svd(self, J, full_matrices=False):
-        """Compute the singular value decomposition of the Jacobian."""
+        """Compute a singular-value decomposition with JAX.
+
+        Parameters
+        ----------
+        J : jax.Array
+            Matrix with shape ``(m, n)``.
+        full_matrices : bool, optional
+            Whether to compute full-sized left and right singular-vector
+            matrices.
+
+        Returns
+        -------
+        U : jax.Array
+            Left singular vectors.
+        S : jax.Array
+            Singular values with shape ``(min(m, n),)``.
+        Vt : jax.Array
+            Transposed right singular vectors.
+        """
         U, S, Vt = jnp.linalg.svd(J, full_matrices=full_matrices)
         return U, S, Vt
 
     def _tangent_vec(self, phi: jnp.ndarray) -> jnp.ndarray:
-        """Vector in the nullspace of jacobian"""
+        """Calculate a tangent vector to the residual manifold.
+
+        Parameters
+        ----------
+        phi : jax.Array
+            State vector with shape ``(n,)``.
+
+        Returns
+        -------
+        jax.Array
+            Unit vector with shape ``(n,)`` from the right null space of the
+            residual Jacobian.
+
+        Notes
+        -----
+        The singular-value decomposition does not define the sign of the
+        tangent. Directional consistency is imposed later by
+        :meth:`_step_once`.
+        """
         J = self._jac_fn(phi)
         _, _, Vt = self._svd_fn(J, full_matrices=True)
         ns = Vt[-1]
         return ns
 
     def _projection(self, phi: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray, float]:
-        """Projects composition back onto the coexistence manifold."""
+        """Calculate one regularized Newton projection update.
+
+        Parameters
+        ----------
+        phi : jax.Array
+            State vector with shape ``(n,)``.
+
+        Returns
+        -------
+        correction : jax.Array
+            Newton correction with shape ``(n,)``. Adding it to ``phi`` moves
+            the state toward the zero-residual manifold.
+        residual : jax.Array
+            Residual evaluated at ``phi``, with shape ``(n - 1,)``.
+        min_singular_value : jax.Array
+            Scalar smallest absolute singular value of the residual Jacobian.
+
+        Notes
+        -----
+        Singular values that are small relative to the largest singular value
+        are excluded from the pseudoinverse. The relative threshold adapts to
+        the residual norm and is clipped to the interval ``[1e-12, 1e-6]``.
+        """
         res = self._residual_jit(phi)
 
         # Adaptive tolerance
@@ -85,6 +212,24 @@ class BaseStepper(ABC):
     def _hit_initial_cycle(
         self, step: jnp.ndarray, phi: jnp.ndarray, phi_hist: jnp.ndarray
     ):
+        """Check whether a trace has returned to its initial state.
+
+        Parameters
+        ----------
+        step : jax.Array
+            Scalar index of the current tracing step.
+        phi : jax.Array
+            Current state vector with shape ``(n,)``.
+        phi_hist : jax.Array
+            Preallocated state history with shape ``(max_steps + 1, n)``.
+
+        Returns
+        -------
+        jax.Array
+            Scalar Boolean array. It is ``True`` when at least
+            :attr:`CYCLE_MIN_STEPS` have been taken and the state is within
+            :attr:`CYCLE_INIT_TOL` of the initial state.
+        """
         phi0 = phi_hist[0]
         dist0 = jnp.linalg.norm(phi - phi0)
         return jnp.logical_and(
@@ -92,6 +237,19 @@ class BaseStepper(ABC):
         )
 
     def _decode_status(self, status):
+        """Convert a status bit mask to human-readable flag names.
+
+        Parameters
+        ----------
+        status : int or jax.Array
+            Scalar integer whose bits encode tracing conditions.
+
+        Returns
+        -------
+        list of str
+            Zero or more of ``"MAX_STEPS"``, ``"PROJECTION_FAIL"``,
+            ``"NAN"``, ``"ANGLE_FAIL"``, and ``"CYCLED"``, in that order.
+        """
         flags = []
         if status & 1:
             flags.append("MAX_STEPS")
@@ -108,9 +266,31 @@ class BaseStepper(ABC):
     def _projection_loop(
         self, phi: jnp.ndarray
     ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
-        """
-        Newton-style projection loop, capped at 100 iters.
-        Returns: (projected_phi, final_residual_norm, final_sv, failed_flag)
+        """Iteratively project a state onto the zero-residual manifold.
+
+        Parameters
+        ----------
+        phi : jax.Array
+            Predicted state vector with shape ``(n,)``.
+
+        Returns
+        -------
+        projected_phi : jax.Array
+            Projected state vector with shape ``(n,)``.
+        residual_norm : jax.Array
+            Scalar residual norm from the final projection iteration.
+        min_singular_value : jax.Array
+            Scalar smallest absolute Jacobian singular value from the final
+            projection iteration.
+        failed : jax.Array
+            Scalar Boolean array indicating that the iteration limit was
+            exceeded before convergence.
+
+        Notes
+        -----
+        Iteration continues until the residual norm is at most ``1e-10`` or
+        the projection has taken more than 100 updates. The loop uses
+        :func:`jax.lax.while_loop` so that it remains JIT-compatible.
         """
 
         # Compute initial residual norm and sv from a *single* projection eval
@@ -155,9 +335,58 @@ class BaseStepper(ABC):
         max_steps: int,
         phi_dtype,
     ):
-        """
-        Perform exactly one step of the outer tracing loop.
-        Returns updated (step, active, phi_new, sv, phi_hist, sv_hist, status).
+        """Perform one iteration of the outer tracing loop.
+
+        Parameters
+        ----------
+        step : jax.Array
+            Scalar index of the current tracing step.
+        active : jax.Array
+            Scalar Boolean array indicating whether tracing is active.
+        phi_new : jax.Array
+            Current state vector with shape ``(n,)``.
+        sv : jax.Array
+            Scalar smallest Jacobian singular value at the current state.
+        phi_hist : jax.Array
+            Preallocated state history with shape ``(max_steps + 1, n)``.
+        sv_hist : jax.Array
+            Preallocated singular-value history with shape
+            ``(max_steps + 1,)``.
+        status : jax.Array
+            Scalar integer status bit mask.
+        v_init : jax.Array
+            Initial tangent direction with shape ``(n,)``.
+        delta_0 : float
+            Minimum predictor step size.
+        delta_1 : float
+            Maximum predictor step size.
+        max_steps : int
+            Maximum number of predictor--corrector steps.
+        phi_dtype : numpy.dtype or jax.numpy.dtype
+            Data type used when choosing the tangent orientation.
+
+        Returns
+        -------
+        step : jax.Array
+            Updated scalar step index.
+        active : jax.Array
+            Updated scalar active flag.
+        phi_new : jax.Array
+            Updated state vector with shape ``(n,)``.
+        sv : jax.Array
+            Updated scalar smallest singular value.
+        phi_hist : jax.Array
+            Updated state-history buffer.
+        sv_hist : jax.Array
+            Updated singular-value-history buffer.
+        status : jax.Array
+            Updated scalar status bit mask.
+
+        Notes
+        -----
+        The predictor step size is the current singular value clipped to
+        ``[delta_0, delta_1]``. The method records projection, NaN, angle,
+        maximum-step, and cycle conditions in ``status``.
         """
 
         # Stop if already terminated
@@ -235,10 +464,44 @@ class BaseStepper(ABC):
         return step2, active2, phi2, sv2, phi_hist2, sv_hist2, status2
 
     def _loop_cond(self, carry):
+        """Return the active flag from a tracing-loop state.
+
+        Parameters
+        ----------
+        carry : tuple
+            Loop state ``(step, active, phi, sv, phi_hist, sv_hist, status)``.
+
+        Returns
+        -------
+        jax.Array
+            Scalar Boolean array controlling the outer JAX loop.
+        """
         step, active, phi_new, sv, phi_hist, sv_hist, status = carry
         return active
 
     def _loop_body(self, carry, v_init, delta_0, delta_1, max_steps, phi_dtype):
+        """Advance the tracing-loop state by one iteration.
+
+        Parameters
+        ----------
+        carry : tuple
+            Loop state ``(step, active, phi, sv, phi_hist, sv_hist, status)``.
+        v_init : jax.Array
+            Initial tangent direction with shape ``(n,)``.
+        delta_0 : float
+            Minimum predictor step size.
+        delta_1 : float
+            Maximum predictor step size.
+        max_steps : int
+            Maximum number of predictor--corrector steps.
+        phi_dtype : numpy.dtype or jax.numpy.dtype
+            State-vector data type.
+
+        Returns
+        -------
+        tuple
+            Updated loop state in the same order as ``carry``.
+        """
         step, active, phi_new, sv, phi_hist, sv_hist, status = carry
         return self._step_once(
             step=step,
@@ -263,7 +526,35 @@ class BaseStepper(ABC):
         delta_1: float,
         max_steps: int,
     ):
-        """Executes the stepping procedure and returns the coexistance curve"""
+        """Execute the JIT-compatible core tracing loop.
+
+        Parameters
+        ----------
+        phi_init : jax.Array
+            Initial state vector with shape ``(n,)``.
+        v_init : jax.Array
+            Initial tangent direction with shape ``(n,)``.
+        delta_0 : float
+            Minimum predictor step size.
+        delta_1 : float
+            Maximum predictor step size.
+        max_steps : int
+            Maximum number of predictor--corrector steps. This argument is
+            static when the method is JIT-compiled.
+
+        Returns
+        -------
+        phi_hist : jax.Array
+            Preallocated state-history buffer with shape
+            ``(max_steps + 1, n)``. Entries after the final step remain zero.
+        sv_hist : jax.Array
+            Preallocated singular-value-history buffer with shape
+            ``(max_steps + 1,)``.
+        final_step : jax.Array
+            Scalar index of the final populated history entry.
+        status : jax.Array
+            Scalar integer status bit mask.
+        """
 
         n = phi_init.shape[0]
         max_steps = int(max_steps)
@@ -309,7 +600,41 @@ class BaseStepper(ABC):
         delta_0=2e-4,
         delta_1=1e-3,
     ):
-        """Executes the stepping procedure and returns the coexistance curve"""
+        """Trace a coexistence curve from an initial state and direction.
+
+        Parameters
+        ----------
+        phi_init : numpy.ndarray or jax.Array
+            Initial state vector with shape ``(n,)``. Entries are ordered by
+            phase, with the independent component coordinates of phase A
+            followed by those of phase B. Consequently, ``n`` must be even.
+        v_init : numpy.ndarray or jax.Array
+            Initial tangent direction with shape ``(n,)`` and the same
+            coordinate ordering and data type as ``phi_init``.
+        delta_0 : float, optional
+            Minimum predictor step size.
+        delta_1 : float, optional
+            Maximum predictor step size.
+
+        Returns
+        -------
+        phis : numpy.ndarray
+            Traced compositions with shape ``(2, n // 2, k)``. The axes
+            correspond to phase, independent component, and trace point.
+        svs : numpy.ndarray
+            Smallest Jacobian singular value at each trace point, with shape
+            ``(k,)``.
+        flags : list of str
+            Status names encountered during tracing. Possible entries are
+            ``"MAX_STEPS"``, ``"PROJECTION_FAIL"``, ``"NAN"``,
+            ``"ANGLE_FAIL"``, and ``"CYCLED"``.
+
+        Notes
+        -----
+        ``MAX_STEPS`` determines the fixed buffer size compiled by JAX. The
+        unused part of each buffer is removed before the NumPy results are
+        returned.
+        """
         max_steps = int(self.MAX_STEPS)
         phi_jnp = jnp.asarray(phi_init)
         v_jnp = jnp.asarray(v_init, dtype=phi_init.dtype)
@@ -332,5 +657,4 @@ class BaseStepper(ABC):
         n = phi_hist.shape[1]
         phis = np.transpose(phi_hist.reshape(-1, 2, n // 2), axes=(1, 2, 0))
 
-        return phis, svs, flags
         return phis, svs, flags
