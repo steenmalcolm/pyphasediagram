@@ -2,7 +2,6 @@ import numpy as np
 import pytest
 import networkx as nx
 from shapely import LineString
-import shapely.plotting as splt
 
 from pyphasediagram.spinodal import SpinodalPoint, CriticalPoint, Spinodal
 
@@ -445,7 +444,6 @@ import networkx as nx
 import shapely
 
 from pyphasediagram.spinodal import Spinodal
-
 
 # ----------------------------
 # Helpers

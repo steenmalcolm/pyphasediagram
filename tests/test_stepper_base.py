@@ -1,13 +1,9 @@
-# tests/test_base_stepper.py
-import numpy as np
-import pytest
 import jax
 import jax.numpy as jnp
+import numpy as np
+import pytest
 
 from pyphasediagram.stepper.base import BaseStepper
-
-# TODO: Add End-to-end tests that build a full graph and check for expected properties such as geometry and orientation of critical point
-# and include tests on symmetric system for 2.5<chi<3.2
 
 
 @pytest.fixture(scope="module")
@@ -30,6 +26,7 @@ def phi():
 
 @pytest.fixture()
 def v_init():
+    """Initial guess for the Newton step."""
     return np.array([1.0, 0.0, 1.0, 0.0], dtype=jnp.float64)
 
 
