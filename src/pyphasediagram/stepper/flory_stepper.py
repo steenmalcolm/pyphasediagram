@@ -1,3 +1,11 @@
+"""Flory--Huggins coexistence-curve tracing for ternary mixtures.
+
+The module specializes :class:`~pyphasediagram.stepper.base.BaseStepper` with
+the chemical-potential and osmotic-pressure constraints of an incompressible
+ternary mixture.  It also provides initial states near each binary edge of the
+composition triangle.
+"""
+
 import jax.numpy as jnp
 import numpy as np
 from scipy.optimize import root
@@ -6,15 +14,78 @@ from pyphasediagram.stepper.base import BaseStepper
 
 
 class Stepper(BaseStepper):
-    """Coexistence curve stepper for a ternary mixture."""
+    r"""Trace two-phase coexistence curves for a ternary mixture.
+
+    Parameters
+    ----------
+    chis : array-like
+        Reduced interaction matrix with shape ``(2, 2)`` for the two
+        independent composition coordinates.
+
+    Attributes
+    ----------
+    chis : jax.Array
+        Reduced interaction matrix with shape ``(2, 2)``.
+
+    Notes
+    -----
+    A state is ordered as
+    :math:`\boldsymbol{\phi} = (\phi_1^{(a)}, \phi_2^{(a)},
+    \phi_1^{(b)}, \phi_2^{(b)})`, where :math:`a` and :math:`b` label the
+    two phases. The solvent composition in phase :math:`\alpha` is given by the incompressibility condition
+
+    .. math::
+
+       \phi_0^{(\alpha)} = 1 - \phi_1^{(\alpha)} - \phi_2^{(\alpha)}.
+    """
 
     def __init__(self, chis):
         self.chis = jnp.asarray(chis)  # (2,2)
         super().__init__()
 
     def residual(self, phi: jnp.ndarray) -> jnp.ndarray:
-        """
-        Return chemical potential and osmotic pressure differences between phases.
+        r"""Evaluate the two-phase coexistence constraints.
+
+        Parameters
+        ----------
+        phi : jax.Array
+            Phase compositions with shape ``(4,)`` and ordering
+            ``[phi1_a, phi2_a, phi1_b, phi2_b]``.
+
+        Returns
+        -------
+        jax.Array
+            Residual with shape ``(3,)`` containing the phase-A minus phase-B
+            differences in the two independent chemical potentials followed
+            by the osmotic-pressure difference.
+
+        Notes
+        -----
+        For each phase :math:`\alpha \in \{a, b\}`, the independent chemical
+        potentials are
+
+        .. math::
+
+           \mu_i^{(\alpha)} =
+           \ln \phi_i^{(\alpha)} - \ln \phi_0^{(\alpha)}
+           + \sum_{j=1}^{2} \chi_{ij}\phi_j^{(\alpha)},
+           \qquad i \in \{1, 2\},
+
+        and the osmotic pressure is
+
+        .. math::
+
+           \Pi^{(\alpha)} = -\ln \phi_0^{(\alpha)}
+           + \frac{1}{2}\sum_{i,j=1}^{2}
+           \chi_{ij}\phi_i^{(\alpha)}\phi_j^{(\alpha)}.
+
+        Here,
+        :math:`\phi_0^{(\alpha)} = 1 - \phi_1^{(\alpha)} -
+        \phi_2^{(\alpha)}`. and :math:`\chi_{ij}` are the reduced interaction parameters.
+
+        The logarithms require positive independent compositions and positive
+        :math:`\phi_0^{(\alpha)}`. Invalid states are handled by
+        :meth:`is_terminate` during curve tracing rather than validated here.
         """
         phis_phase = phi.reshape(2, -1)  # (2, 2)
         phi0_phase = 1.0 - phis_phase.sum(axis=1)  # (2,)
@@ -28,7 +99,27 @@ class Stepper(BaseStepper):
         return jnp.hstack((mu_diff, pi_diff))  # (3,)
 
     def is_terminate(self, phi: jnp.ndarray) -> jnp.ndarray:
-        """Stop when phases become too similar or invalid composition."""
+        """Determine whether curve tracing should stop.
+
+        Parameters
+        ----------
+        phi : jax.Array
+            Phase compositions with shape ``(4,)`` and ordering
+            ``[phi1_a, phi2_a, phi1_b, phi2_b]``.
+
+        Returns
+        -------
+        jax.Array
+            Scalar Boolean array. It is ``True`` if the phase compositions
+            differ by less than ``1e-3``, if an independent composition is
+            negative, or if the independent compositions in either phase sum
+            to more than one.
+
+        Notes
+        -----
+        This method uses only JAX operations because it is called from the
+        JIT-compiled tracing loop.
+        """
         # IMPORTANT: This must be JAX-traceable for the fully-jitted run loop.
 
         close = jnp.linalg.norm(phi[2:] - phi[:2]) < 1e-3
@@ -39,7 +130,39 @@ class Stepper(BaseStepper):
         return jnp.logical_or(close, invalid)
 
     def binary_state(self, chi) -> float:
-        """Find the binary coexistence point for the given Flory parameter."""
+        r"""Calculate the dilute fraction of a symmetric binary coexistence.
+
+        The dense volume fraction follows from the incompressibility
+        condition.
+
+        Parameters
+        ----------
+        chi : float
+            Binary Flory--Huggins interaction parameter.
+
+        Returns
+        -------
+        float or None
+            Dilute-phase composition :math:`x \in (0, 1/2)`. ``None`` is
+            returned when :math:`\chi \leq 2`, for which this model has no
+            demixed binary state.
+
+        Raises
+        ------
+        ValueError
+            If the SciPy root solver does not converge.
+
+        Notes
+        -----
+        The method solves the implicit equation
+
+        .. math::
+
+           \ln\!\left(\frac{x}{1-x}\right) + \chi(1-2x) = 0
+
+        from an initial guess of ``1e-4``. It runs only during initialization
+        and is not JIT-compiled.
+        """
         # This is initialization (SciPy); it does not need to be jitted to run the main stepper loop.
         if chi <= 2:
             print(f"Warning: Chi value {chi:.2f}<=2 too low for phase separation")
@@ -52,7 +175,44 @@ class Stepper(BaseStepper):
         return float(sol.x.item())
 
     def binary_init(self, which_comp: int = 0) -> jnp.ndarray:
-        """Find an initial coexistence point for the dilute limit of one component"""
+        r"""Construct an initial state near a binary limit.
+
+        Parameters
+        ----------
+        which_comp : {0, 1, 2}, optional
+            Component selected to be dilute. The corresponding demixing
+            pair and effective binary interaction are listed below, where
+            :math:`\chi_{ij}` denotes the reduced interaction matrix ``chis``.
+
+            * ``0``: components 1 and 2, with
+              :math:`\chi = \chi_{01}
+              - (\chi_{00} + \chi_{11})/2`;
+            * ``1``: components 0 and 2, with
+              :math:`\chi = -\chi_{11}/2`;
+            * ``2``: components 0 and 1, with
+              :math:`\chi = -\chi_{00}/2`.
+
+
+        Returns
+        -------
+        phi_init : numpy.ndarray or None
+            Initial phase compositions with shape ``(4,)`` and ordering
+            ``[phi1_a, phi2_a, phi1_b, phi2_b]``. ``None`` indicates that an
+            initial state could not be constructed.
+        v_init : numpy.ndarray or None
+            Initial tracing direction with shape ``(4,)`` and the same
+            coordinate ordering. ``None`` is returned together with a missing
+            initial state.
+
+        Notes
+        -----
+        ``(None, None)`` is returned when the selected effective interaction
+        is at most 2, when ``which_comp`` is outside ``{0, 1, 2}``, or when
+        projection has not converged after :math:`10\,000` iterations.
+        Otherwise, the initial composition is projected until
+        :math:`\lVert\boldsymbol{r}\rVert_2 \leq 10^{-8}`. Candidate updates
+        are shortened to remain inside the valid composition domain.
+        """
 
         phi_init: np.ndarray = None
         v_init: np.ndarray = None
@@ -119,9 +279,10 @@ class Stepper(BaseStepper):
 
 
 if __name__ == "__main__":
-    import matplotlib.pyplot as plt
     import time
+
     import flory
+    import matplotlib.pyplot as plt
 
     np.random.seed(42)
     for i in range(100):
