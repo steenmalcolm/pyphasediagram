@@ -1,9 +1,9 @@
+import networkx as nx
 import numpy as np
 import pytest
-import networkx as nx
 from shapely import LineString
 
-from pyphasediagram.spinodal import SpinodalPoint, CriticalPoint, Spinodal
+from pyphasediagram.spinodal import CriticalPoint, Spinodal, SpinodalPoint
 
 # TODO: Add End-to-end tests that build a full spinodal graph and check for expected properties such as geometry and orientation of critical point
 # and include tests on symmetric system for 2.5<chi<3.2
@@ -66,40 +66,44 @@ def test_spinodal_init(simple_chis):
     assert sp.node_id == 0
 
 
-def test_get_p_q_scalar_matches_manual(simple_chis):
+def test_get_quadratic_coefficients_scalar_matches_manual(simple_chis):
     sp = Spinodal(simple_chis)
     phi = 0.3
 
-    a, b, c = simple_chis[0, 0], simple_chis[1, 1], simple_chis[0, 1]
+    a, b, c = simple_chis[1, 1], simple_chis[0, 0], simple_chis[0, 1]
     det = a * b - c**2
 
-    p_expected = (2 * phi * c - a - phi * (1 - phi) * det) / (a + det * phi)
-    q_expected = (1 + phi * (1 - phi) * b) / (a + det * phi)
+    quadratic_expected = a + det * phi
+    linear_expected = 2 * phi * c - a - phi * (1 - phi) * det
+    constant_expected = -(1 + phi * (1 - phi) * b)
 
-    p, q = sp._get_p_q(phi, is_calculate_phi2=True)
-    assert p == pytest.approx(p_expected)
-    assert q == pytest.approx(q_expected)
+    quadratic, linear, constant = sp._get_quadratic_coefficients(phi)
+    assert quadratic == pytest.approx(quadratic_expected)
+    assert linear == pytest.approx(linear_expected)
+    assert constant == pytest.approx(constant_expected)
 
 
-def test_get_p_q_swap_flag_equivalent_to_swapping_a_b(simple_chis):
-    sp = Spinodal(simple_chis)
+def test_get_quadratic_coefficients_swap_flag_equivalent_to_swapping_a_b():
+    chis = np.array([[1.5, 0.2], [0.2, -0.7]])
+    sp = Spinodal(chis)
     phi = 0.42
 
-    p1, q1 = sp._get_p_q(phi, is_calculate_phi2=False)
+    coefficients = sp._get_quadratic_coefficients(
+        phi, is_calculate_phi2=False
+    )
 
     # emulate swap a<->b as in code path
     chis_swapped = np.array(
         [
-            [simple_chis[1, 1], simple_chis[0, 1]],
-            [simple_chis[1, 0], simple_chis[0, 0]],
+            [chis[1, 1], chis[0, 1]],
+            [chis[1, 0], chis[0, 0]],
         ],
         dtype=float,
     )
     sp_swapped = Spinodal(chis_swapped)
-    p2, q2 = sp_swapped._get_p_q(phi, is_calculate_phi2=True)
+    swapped_coefficients = sp_swapped._get_quadratic_coefficients(phi)
 
-    assert p1 == pytest.approx(p2)
-    assert q1 == pytest.approx(q2)
+    assert coefficients == pytest.approx(swapped_coefficients)
 
 
 def test_phi2_from_phi1_vector_shapes(simple_chis):
@@ -118,6 +122,20 @@ def test_phi2_from_phi1_scalar_returns_scalar_like(simple_chis):
     # numpy scalar or python float is fine; ensure it's not an array with wrong shape
     assert np.isscalar(phi2a) or (isinstance(phi2a, np.ndarray) and phi2a.shape == ())
     assert np.isscalar(phi2b) or (isinstance(phi2b, np.ndarray) and phi2b.shape == ())
+
+
+def test_phi2_from_phi1_solves_linear_equation_when_quadratic_term_is_zero():
+    chis = np.array([[-2.0, 0.0], [0.0, -4.0]])
+    spinodal = Spinodal(chis)
+
+    quadratic, linear, constant = spinodal._get_quadratic_coefficients(0.5)
+    upper, lower = spinodal._phi2_from_phi1(0.5)
+
+    assert quadratic == pytest.approx(0.0)
+    assert linear != pytest.approx(0.0)
+    assert upper == pytest.approx(-constant / linear)
+    assert lower == pytest.approx(-constant / linear)
+    assert upper == pytest.approx(0.25)
 
 
 def test_domain_data_adds_nodes_and_edges(simple_chis):
@@ -437,10 +455,228 @@ class TestInDomain:
         np.testing.assert_array_equal(result, expected)
 
 
+# ---------------------------------------------------------------------------
+# Known regression cases
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("chis", "expected_endpoint_indices"),
+    [
+        pytest.param(np.zeros((2, 2)), [], id="zero-interactions"),
+        pytest.param(
+            np.array([[-4.0, -2.0], [-2.0, -4.0]]),
+            [33334, 99999],
+            id="symmetric-threshold",
+        ),
+    ],
+)
+def test_spinodal_domains_return_finite_interval_pairs(
+    chis, expected_endpoint_indices
+):
+    """Degenerate coefficients must not create malformed interval endpoints."""
+    spinodal = Spinodal(chis)
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        domains = spinodal._spinodal_domains()
+
+    assert np.all(np.isfinite(domains))
+    assert len(domains) % 2 == 0
+    assert np.all((domains >= 0.0) & (domains <= 1.0))
+    assert np.all(domains[::2] < domains[1::2])
+
+    phi1_grid = np.linspace(0.0, 1.0, 100000)
+    np.testing.assert_array_equal(domains, phi1_grid[expected_endpoint_indices])
+
+
+def test_spinodal_domains_include_sample_with_linear_solution():
+    chis = np.array([[-3.0, 0.0], [0.0, -2.0]])
+    spinodal = Spinodal(chis)
+    linear_phi1 = 1.0 / 3.0
+
+    quadratic, linear, _ = spinodal._get_quadratic_coefficients(linear_phi1)
+    domains = spinodal._spinodal_domains().reshape(-1, 2)
+
+    assert quadratic == pytest.approx(0.0)
+    assert linear != pytest.approx(0.0)
+    assert any(start <= linear_phi1 <= stop for start, stop in domains)
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="corner masks are added arithmetically and can index past DOMAIN_CORNERS",
+)
+def test_build_polygons_handles_endpoints_near_simplex_corners(simple_chis):
+    """Endpoints satisfying two boundary conditions must not corrupt masks."""
+    spinodal = Spinodal(simple_chis)
+    points = [
+        SpinodalPoint(0, 0.001, 0.001),
+        SpinodalPoint(1, 0.250, 0.250),
+        SpinodalPoint(2, 0.001, 0.998),
+    ]
+    spinodal.spinodal_graph = _make_path_subgraph(points)
+
+    spinodal._build_polygons()
+
+    assert isinstance(spinodal.polygons, list)
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="build appends to the existing graph and critical-point collection",
+)
+def test_build_replaces_previous_state(monkeypatch, simple_chis):
+    """Calling build twice should not duplicate previously calculated state."""
+    spinodal = Spinodal(simple_chis)
+    monkeypatch.setattr(spinodal, "_spinodal_domains", lambda: np.array([0.1, 0.2]))
+
+    def fake_domain_data(phi1_i, phi1_f, num_points):
+        point_a = SpinodalPoint(spinodal.node_id, phi1_i, 0.1)
+        spinodal.node_id += 1
+        point_b = SpinodalPoint(spinodal.node_id, phi1_f, 0.1)
+        spinodal.node_id += 1
+        spinodal.spinodal_graph.add_edge(point_a, point_b)
+
+    def fake_find_critical_points():
+        spinodal.critical_points.append(CriticalPoint(-1, 0.2, 0.2, 1.0, 0.0))
+
+    monkeypatch.setattr(spinodal, "_domain_data", fake_domain_data)
+    monkeypatch.setattr(spinodal, "_clip_to_domain", lambda: None)
+    monkeypatch.setattr(spinodal, "_connect_branches", lambda: None)
+    monkeypatch.setattr(spinodal, "_find_critical_points", fake_find_critical_points)
+    monkeypatch.setattr(
+        spinodal, "_build_polygons", lambda: setattr(spinodal, "polygons", [])
+    )
+
+    spinodal.build(num_points=2)
+    first_state = (
+        spinodal.spinodal_graph.number_of_nodes(),
+        spinodal.spinodal_graph.number_of_edges(),
+        spinodal.node_id,
+        len(spinodal.critical_points),
+    )
+
+    spinodal.build(num_points=2)
+    second_state = (
+        spinodal.spinodal_graph.number_of_nodes(),
+        spinodal.spinodal_graph.number_of_edges(),
+        spinodal.node_id,
+        len(spinodal.critical_points),
+    )
+
+    assert second_state == first_state
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="an exact sampled zero is counted as two critical-point roots",
+)
+def test_find_critical_points_deduplicates_exact_sampled_root(
+    monkeypatch, simple_chis, trivial_spinodal_graph
+):
+    """A sign sequence of ``[-1, 0, 1]`` represents one critical point."""
+    spinodal = Spinodal(simple_chis)
+    spinodal.spinodal_graph = trivial_spinodal_graph
+    monkeypatch.setattr(
+        spinodal,
+        "_coords_from_subgraph",
+        lambda graph: (np.array([0.1, 0.2, 0.3]), np.array([0.2, 0.2, 0.2])),
+    )
+
+    def fake_third_derivative(phi1, phi2):
+        if np.ndim(phi1) > 0:
+            return np.array([-1.0, 0.0, 1.0])
+        return 0.0
+
+    monkeypatch.setattr(spinodal, "_third_derivative", fake_third_derivative)
+
+    spinodal._find_critical_points()
+
+    assert len(spinodal.critical_points) == 1
+    assert spinodal.critical_points[0].phi1 == pytest.approx(0.2)
+    assert spinodal.critical_points[0].phi2 == pytest.approx(0.2)
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="large negative interpolation residuals do not emit a warning",
+)
+def test_find_critical_points_warns_for_large_magnitude_interpolation_residual(
+    monkeypatch, simple_chis, trivial_spinodal_graph
+):
+    """An inaccurate interpolated root should emit a visible warning."""
+    spinodal = Spinodal(simple_chis)
+    spinodal.spinodal_graph = trivial_spinodal_graph
+    monkeypatch.setattr(
+        spinodal,
+        "_coords_from_subgraph",
+        lambda graph: (np.array([0.1, 0.2]), np.array([0.2, 0.1])),
+    )
+
+    def fake_third_derivative(phi1, phi2):
+        if np.ndim(phi1) > 0:
+            return np.array([-1.0, 1.0])
+        return -0.1
+
+    monkeypatch.setattr(spinodal, "_third_derivative", fake_third_derivative)
+
+    with pytest.warns(Warning, match="Third derivative at critical point"):
+        spinodal._find_critical_points()
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="the vertical-angle check divides by a zero displacement component",
+)
+def test_build_polygons_avoids_division_by_zero_for_horizontal_tangent(simple_chis):
+    """A horizontal endpoint tangent should be handled without floating errors."""
+    spinodal = Spinodal(simple_chis)
+    points = [
+        SpinodalPoint(0, 0.2, 0.2),
+        SpinodalPoint(1, 0.3, 0.2),
+        SpinodalPoint(2, 0.4, 0.3),
+    ]
+    spinodal.spinodal_graph = _make_path_subgraph(points)
+
+    with np.errstate(divide="raise", invalid="raise"):
+        spinodal._build_polygons()
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="plot reports that NaN branches are skipped but still plots them",
+)
+def test_plot_skips_components_containing_nan(monkeypatch, simple_chis):
+    """No plotted spinodal branch should contain a NaN coordinate."""
+    import matplotlib.pyplot as plt
+
+    spinodal = Spinodal(simple_chis)
+    spinodal.spinodal_graph.add_edge(
+        SpinodalPoint(0, 0.1, np.nan),
+        SpinodalPoint(1, 0.2, 0.2),
+    )
+    plot_calls = []
+
+    monkeypatch.setattr(plt, "plot", lambda *args, **kwargs: plot_calls.append(args))
+    monkeypatch.setattr(plt, "title", lambda *args, **kwargs: None)
+    monkeypatch.setattr(plt, "xlim", lambda *args, **kwargs: None)
+    monkeypatch.setattr(plt, "ylim", lambda *args, **kwargs: None)
+    monkeypatch.setattr(plt, "xlabel", lambda *args, **kwargs: None)
+    monkeypatch.setattr(plt, "ylabel", lambda *args, **kwargs: None)
+    monkeypatch.setattr(plt, "legend", lambda *args, **kwargs: None)
+
+    spinodal.plot()
+
+    assert all(
+        not np.isnan(np.asarray(args[1], dtype=float)).any() for args in plot_calls
+    )
+
+
+import networkx as nx
+
 # tests/test_spinodal_e2e.py
 import numpy as np
 import pytest
-import networkx as nx
 import shapely
 
 from pyphasediagram.spinodal import Spinodal

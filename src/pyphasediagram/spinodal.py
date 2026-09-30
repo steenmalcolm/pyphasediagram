@@ -109,36 +109,63 @@ class Spinodal:
         self._find_critical_points()
         self._build_polygons()
 
-    def _get_p_q(self, phi, is_calculate_phi2=True):
-        """Calculate coefficients of the quadratic spinodal equation.
+    def _get_quadratic_coefficients(self, phi, is_calculate_phi2=True):
+        """Return the unnormalized spinodal-polynomial coefficients.
 
         Parameters
         ----------
         phi : float or array-like
             Known independent composition coordinate.
         is_calculate_phi2 : bool, optional
-            If ``True``, calculate coefficients for ``phi2`` given ``phi1``.
-            If ``False``, calculate coefficients for ``phi1`` given ``phi2``.
+            If ``True``, form the polynomial for ``phi2`` given ``phi1``.
+            If ``False``, form the polynomial for ``phi1`` given ``phi2``.
 
         Returns
         -------
-        p : float or numpy.ndarray
-            Linear coefficient of ``x**2 + p*x - q = 0``.
-        q : float or numpy.ndarray
-            Negated constant coefficient of ``x**2 + p*x - q = 0``.
-
-        Notes
-        -----
-        Outputs follow the scalar or broadcast array shape of ``phi``. Poles
-        can occur where the common denominator of the coefficients vanishes.
+        quadratic : float or numpy.ndarray
+            Coefficient of ``x**2``.
+        linear : float or numpy.ndarray
+            Coefficient of ``x``.
+        constant : float or numpy.ndarray
+            Constant term in ``quadratic*x**2 + linear*x + constant = 0``.
         """
         a, b, c = self.chis[1, 1], self.chis[0, 0], self.chis[0, 1]
         if is_calculate_phi2 == False:
             a, b = b, a  # swap a and b if computing phi1 from phi2
+
         det = a * b - c**2
-        p = (2 * phi * c - a - phi * (1 - phi) * det) / (a + det * phi)
-        q = (1 + phi * (1 - phi) * b) / (a + det * phi)
-        return p, q
+        quadratic = a + det * phi
+        linear = 2 * phi * c - a - phi * (1 - phi) * det
+        constant = -(1 + phi * (1 - phi) * b)
+        return quadratic, linear, constant
+
+    @staticmethod
+    def _polynomial_degree_masks(quadratic, linear, constant):
+        """Classify polynomial samples as quadratic or linear.
+
+        Coefficients smaller than floating-point resolution relative to the
+        polynomial's coefficient scale are treated as zero.
+
+        Returns
+        -------
+        is_quadratic : bool or numpy.ndarray
+            Samples with a nonzero quadratic coefficient.
+        is_linear : bool or numpy.ndarray
+            Samples with a zero quadratic coefficient and nonzero linear
+            coefficient.
+        """
+        coefficient_scale = np.maximum.reduce(
+            [
+                np.abs(quadratic),
+                np.abs(linear),
+                np.abs(constant),
+                np.ones_like(quadratic, dtype=float),
+            ]
+        )
+        zero_tolerance = 32 * np.finfo(float).eps * coefficient_scale
+        is_quadratic = np.abs(quadratic) > zero_tolerance
+        is_linear = ~is_quadratic & (np.abs(linear) > zero_tolerance)
+        return is_quadratic, is_linear
 
     def get_spinodal_coords(self) -> tuple[list[np.ndarray], list[np.ndarray]]:
         """Return ordered coordinates for every connected spinodal branch.
@@ -183,12 +210,58 @@ class Spinodal:
         Notes
         -----
         Output shapes follow ``phi1``. Inputs for which the quadratic
-        discriminant is negative produce ``NaN`` values.
+        discriminant is negative produce ``NaN`` values. If the quadratic
+        coefficient vanishes but the linear coefficient does not, the sole
+        linear solution is returned in both branch arrays. Fully degenerate
+        equations, which do not define a unique solution, produce ``NaN``.
         """
-        p, q = self._get_p_q(phi1)
-        discriminant = p**2 / 4 + q
+        quadratic, linear, constant = self._get_quadratic_coefficients(phi1)
+        is_quadratic, is_linear = self._polynomial_degree_masks(
+            quadratic, linear, constant
+        )
 
-        return -p / 2 + np.sqrt(discriminant), -p / 2 - np.sqrt(discriminant)
+        upper = np.full_like(quadratic, np.nan, dtype=float)
+        lower = np.full_like(quadratic, np.nan, dtype=float)
+
+        with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+            p = np.divide(
+                linear,
+                quadratic,
+                out=np.full_like(quadratic, np.nan, dtype=float),
+                where=is_quadratic,
+            )
+            q = np.divide(
+                -constant,
+                quadratic,
+                out=np.full_like(quadratic, np.nan, dtype=float),
+                where=is_quadratic,
+            )
+            discriminant = p**2 / 4 + q
+            has_real_quadratic_roots = (
+                is_quadratic & np.isfinite(discriminant) & (discriminant >= 0)
+            )
+            square_root = np.sqrt(
+                discriminant,
+                where=has_real_quadratic_roots,
+                out=np.full_like(discriminant, np.nan, dtype=float),
+            )
+            upper[has_real_quadratic_roots] = (
+                -p[has_real_quadratic_roots] / 2 + square_root[has_real_quadratic_roots]
+            )
+            lower[has_real_quadratic_roots] = (
+                -p[has_real_quadratic_roots] / 2 - square_root[has_real_quadratic_roots]
+            )
+
+            linear_root = np.divide(
+                -constant,
+                linear,
+                out=np.full_like(linear, np.nan, dtype=float),
+                where=is_linear,
+            )
+            upper[is_linear] = linear_root[is_linear]
+            lower[is_linear] = linear_root[is_linear]
+
+        return upper, lower
 
     def eigenvalues_from_phi(self, phi1, phi2):
         """Calculate the free-energy Hessian eigenvalues at compositions.
@@ -278,32 +351,53 @@ class Spinodal:
         Notes
         -----
         The discriminant is sampled at 100,000 evenly spaced points on
-        ``[0, 1]``. Sign changes are therefore located to the resolution of
-        that grid rather than by a continuous root solver. Poles in the
-        quadratic coefficients are replaced locally with a neighboring value.
+        ``[0, 1]``. Interval boundaries are therefore located to the
+        resolution of that grid rather than by a continuous root solver.
+        Linear samples, where the quadratic coefficient vanishes, are included
+        when their linear coefficient is nonzero. Non-finite samples, fully
+        degenerate equations, and isolated real solutions are excluded.
         """
         phi1_vals = np.linspace(0, 1, 100000)
 
-        p, q = self._get_p_q(phi1_vals)
-        discriminant = p**2 + 4 * q
+        quadratic, linear, constant = self._get_quadratic_coefficients(phi1_vals)
+        is_quadratic, is_linear = self._polynomial_degree_masks(
+            quadratic, linear, constant
+        )
+        finite_coefficients = (
+            np.isfinite(quadratic) & np.isfinite(linear) & np.isfinite(constant)
+        )
+        with np.errstate(invalid="ignore", over="ignore"):
+            discriminant = linear**2 - 4 * quadratic * constant
 
-        # Edge case where pole of p and q is resolved
-        for pole_idx in np.where(np.isinf(p) | np.isinf(q))[0]:
-            if pole_idx == 0:
-                discriminant[pole_idx] = discriminant[pole_idx + 1]
-            else:
-                discriminant[pole_idx] = discriminant[pole_idx - 1]
+        has_real_quadratic_roots = (
+            finite_coefficients
+            & is_quadratic
+            & np.isfinite(discriminant)
+            & (discriminant >= 0)
+        )
+        has_real_linear_root = finite_coefficients & is_linear
+        has_real_solutions = has_real_quadratic_roots | has_real_linear_root
+        domain_endpoints = []
+        start_idx = None
 
-        roots_idx = np.where(np.diff(np.sign(discriminant)))[0]
+        for idx, has_real_solution in enumerate(has_real_solutions):
+            if has_real_solution and start_idx is None:
+                # A new contiguous interval starts here.
+                start_idx = idx
+            elif not has_real_solution and start_idx is not None:
+                # The previous sample was the end of the current interval.
+                end_idx = idx - 1
+                if start_idx < end_idx:
+                    domain_endpoints.extend((phi1_vals[start_idx], phi1_vals[end_idx]))
+                start_idx = None
 
-        # Check if discriminant is positive at the endpoints and add them to the roots if so, since the spinodal branches can start/end at the domain boundaries
-        if discriminant[0] > 0:
-            roots_idx = np.r_[0, roots_idx]
-        if discriminant[-1] >= 0:
-            roots_idx = np.r_[roots_idx, len(phi1_vals) - 1]
-        # Add 1 at beginning of domain so the discriminant is positive
-        roots_idx[::2] += 1
-        return phi1_vals[roots_idx]
+        # Close an interval that reaches the upper edge of the sampled domain.
+        if start_idx is not None:
+            end_idx = len(phi1_vals) - 1
+            if start_idx < end_idx:
+                domain_endpoints.extend((phi1_vals[start_idx], phi1_vals[end_idx]))
+
+        return np.asarray(domain_endpoints, dtype=float)
 
     @classmethod
     def _in_domain(cls, phi1, phi2):
