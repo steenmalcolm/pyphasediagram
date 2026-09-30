@@ -25,7 +25,7 @@ class BaseStepper(ABC):
 
     MAX_STEPS = 1e5
 
-    # --- cycle termination knobs ---
+    # terminate once we are back at the initial point within tolerance
     CYCLE_MIN_STEPS = 10  # don't trigger immediately
     CYCLE_INIT_TOL = 1e-3  # "back at start" tolerance
 
@@ -52,6 +52,7 @@ class BaseStepper(ABC):
         # and return a scalar boolean-like jnp.ndarray (dtype=bool).
 
     def _svd(self, J, full_matrices=False):
+        """Compute the singular value decomposition of the Jacobian."""
         U, S, Vt = jnp.linalg.svd(J, full_matrices=full_matrices)
         return U, S, Vt
 
