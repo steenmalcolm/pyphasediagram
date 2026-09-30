@@ -8,3 +8,5 @@ src/pyphasediagram/depr
 .DS_Store
 .vscode
 delete
+docs/build/
+docs/source/generated/
