@@ -1,3 +1,11 @@
+r"""High-level construction and visualization of ternary phase diagrams.
+
+The :class:`PhaseDiagram` facade combines spinodal and binodal calculations
+for an incompressible ternary mixture. It also provides convenience plots for
+the resulting coexistence curves, critical points, and phase regions in the
+two independent composition coordinates :math:`(\phi_1, \phi_2)`.
+"""
+
 from typing import Optional
 
 import matplotlib.pyplot as plt
@@ -12,31 +20,88 @@ from pyphasediagram.utils import reduce_chis
 
 
 class PhaseDiagram:
-    """
-    Builds and analyzes a ternary phase diagram from binodal segments.
+    r"""Build and visualize a ternary phase diagram.
 
-    Runs `BinodalStepper` for each binary limit
-    (droplet-regulator, regulator-solvent, droplet-solvent),
-    maps the resulting binodals into (phi_d, phi_r) space, detects three-phase
-    coexistence points from binodal intersections, and finds the compositions of
-    the coexisting phases given a mean composition.
+    The supplied interaction matrix is converted to the reduced form used by
+    :class:`~pyphasediagram.spinodal.Spinodal` and
+    :class:`~pyphasediagram.binodal.Binodal`. Calling :meth:`build` constructs
+    both objects and derives the locally stable one-, two-, and three-phase
+    regions.
 
     Parameters
     ----------
-    chi_01 : float
-        Flory–Huggins interaction parameter between component 0 and 1
-    chi_02 : float
-        Flory–Huggins interaction parameter between component 0 and 2
-    chi_12 : float
-        Flory–Huggins interaction parameter between component 1 and 2
+    chis : array-like
+        Full symmetric Flory--Huggins interaction matrix with shape ``(3, 3)``.
+        Its off-diagonal entry ``chis[i, j]`` is the interaction parameter
+        between components ``i`` and ``j``. Diagonal entries are not used.
 
+    Attributes
+    ----------
+    chis : numpy.ndarray
+        Reduced interaction matrix with shape ``(2, 2)``.
+    spinodal : Spinodal
+        Calculated spinodal curve and locally stable polygons. Available after
+        :meth:`build` has completed.
+    binodal : Binodal
+        Calculated coexistence sections and phase-region polygons. Available
+        after :meth:`build` has completed.
+
+    Raises
+    ------
+    ValueError
+        If ``chis`` does not have shape ``(3, 3)``.
+
+    Notes
+    -----
+    Compositions are represented by the independent coordinates
+    :math:`(\phi_1, \phi_2)`. Incompressibility fixes the remaining fraction
+    as :math:`\phi_0 = 1 - \phi_1 - \phi_2`.
+
+    The interaction matrix has the form
+
+    .. math::
+
+       \boldsymbol{\chi} =
+       \begin{pmatrix}
+       0 & \chi_{01} & \chi_{02} \\
+       \chi_{01} & 0 & \chi_{12} \\
+       \chi_{02} & \chi_{12} & 0
+       \end{pmatrix},
+
+    where the interaction parameters contribute to the dimensionless
+    free-energy density as
+
+    .. math::
+
+       f(\phi_0, \phi_1, \phi_2)
+       = \sum_{i=0}^{2}\phi_i\ln\phi_i
+       + \phi_0\chi_{01}\phi_1
+       + \phi_0\chi_{02}\phi_2
+       + \phi_1\chi_{12}\phi_2.
     """
 
     def __init__(self, chis: np.ndarray) -> None:
+        chis = np.asarray(chis, dtype=float)
+        if chis.shape != (3, 3):
+            raise ValueError(
+                f"PhaseDiagram requires a 3x3 interaction matrix, got shape "
+                f"{chis.shape}"
+            )
         self.chis = reduce_chis(chis)
 
-    def build(self, delta: float = 1e-3) -> None:
-        """Build the phase diagram: compute binodals, map to (phi_d, phi_r), and find 3-phase points."""
+    def build(self) -> None:
+        """Build the spinodal and binodal parts of the phase diagram.
+
+        Returns
+        -------
+        None
+
+        Notes
+        -----
+        Each call creates new :class:`~pyphasediagram.spinodal.Spinodal` and
+        :class:`~pyphasediagram.binodal.Binodal` instances, replacing results
+        from any previous build.
+        """
         self.spinodal = Spinodal(self.chis)
         self.spinodal.build()
         cps = self.spinodal.critical_points
@@ -44,11 +109,48 @@ class PhaseDiagram:
         self.binodal.build(unstable_manifold=self.spinodal.get_unstable_manifold())
 
     def get_compositions(self, phi_m: np.ndarray) -> np.ndarray:
-        """Given a mean composition, return the compositions of coexisting phases."""
+        """Return coexisting phases for a mean composition.
+
+        Parameters
+        ----------
+        phi_m : numpy.ndarray
+            Mean independent composition ``[phi1, phi2]`` with shape ``(2,)``.
+
+        Returns
+        -------
+        None
+            This method is currently a placeholder and does not yet calculate
+            coexistence compositions.
+
+        Notes
+        -----
+        The return annotation describes the intended API; the current
+        implementation returns ``None``.
+        """
         pass
 
     def plot_phase_counts(self, ax: Optional[Axes] = None) -> tuple[Figure, Axes]:
-        """Visualize the number of coexisting phases across the composition space."""
+        """Plot the one-, two-, and three-phase regions.
+
+        Parameters
+        ----------
+        ax : matplotlib.axes.Axes, optional
+            Axes on which to draw. A new figure and axes are created when
+            omitted.
+
+        Returns
+        -------
+        fig : matplotlib.figure.Figure
+            Figure containing the phase-region plot.
+        ax : matplotlib.axes.Axes
+            Axes containing the phase-region plot.
+
+        Notes
+        -----
+        :meth:`build` must be called before this method. The full composition
+        simplex is drawn as the one-phase background, with calculated two- and
+        three-phase polygons overlaid on it.
+        """
         from matplotlib.collections import PatchCollection
         from matplotlib.patches import Patch
         from matplotlib.patches import Polygon as MplPolygon
@@ -133,7 +235,28 @@ class PhaseDiagram:
         return fig, ax
 
     def plot(self, ax: Optional[Axes] = None) -> tuple[Figure, Axes]:
-        """Quick visualization of spinodal, binodal sections, and three-phase points."""
+        """Plot coexistence curves and special points.
+
+        Parameters
+        ----------
+        ax : matplotlib.axes.Axes, optional
+            Axes on which to draw. A new figure and axes are created when
+            omitted.
+
+        Returns
+        -------
+        fig : matplotlib.figure.Figure
+            Figure containing the phase-diagram plot.
+        ax : matplotlib.axes.Axes
+            Axes containing the spinodal curves, binodal sections,
+            three-phase polygon vertices, and critical points.
+
+        Notes
+        -----
+        :meth:`build` must be called before this method. Spinodal curves are
+        dashed black lines, binodal branches are red, critical points are gold
+        stars, and three-phase polygon vertices are shown as markers.
+        """
         if ax is None:
             fig, ax = plt.subplots()
         else:
@@ -185,7 +308,21 @@ class PhaseDiagram:
         return fig, ax
 
     def plot_summary(self) -> tuple[Figure, tuple[Axes, Axes]]:
-        """Side-by-side subplots: binodal/spinodal (left) and phase regions (right)."""
+        """Plot curves and phase regions in a two-panel summary.
+
+        Returns
+        -------
+        fig : matplotlib.figure.Figure
+            Figure containing both summary panels.
+        axes : tuple of matplotlib.axes.Axes
+            Pair ``(curve_ax, region_ax)`` containing the coexistence-curve
+            plot and phase-region plot, respectively.
+
+        Notes
+        -----
+        :meth:`build` must be called before this method. The figure title lists
+        the three independent entries of the reduced interaction matrix.
+        """
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
         fig.suptitle(
             r"$(\chi_{11}, \chi_{12}, \chi_{22}) = "
