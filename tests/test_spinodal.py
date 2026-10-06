@@ -88,9 +88,7 @@ def test_get_quadratic_coefficients_swap_flag_equivalent_to_swapping_a_b():
     sp = Spinodal(chis)
     phi = 0.42
 
-    coefficients = sp._get_quadratic_coefficients(
-        phi, is_calculate_phi2=False
-    )
+    coefficients = sp._get_quadratic_coefficients(phi, is_calculate_phi2=False)
 
     # emulate swap a<->b as in code path
     chis_swapped = np.array(
@@ -471,9 +469,7 @@ class TestInDomain:
         ),
     ],
 )
-def test_spinodal_domains_return_finite_interval_pairs(
-    chis, expected_endpoint_indices
-):
+def test_spinodal_domains_return_finite_interval_pairs(chis, expected_endpoint_indices):
     """Degenerate coefficients must not create malformed interval endpoints."""
     spinodal = Spinodal(chis)
 
@@ -717,7 +713,7 @@ def test_e2e_spinodal_invariants_random_chis(seed):
     rng = np.random.default_rng(seed)
     chis = _random_chis(rng, -10.0, 10.0)
 
-    sp = _build_spinodal_or_skip(chis)
+    sp = _build_spinodal_or_skip(chis, num_points=2000)
     G = sp.spinodal_graph
     nodes = list(G.nodes())
 
