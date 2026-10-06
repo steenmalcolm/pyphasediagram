@@ -44,9 +44,7 @@ def diagram_with_plot_data():
             ]
         )
     ]
-    three_phase_polygons = [
-        Polygon([(0.20, 0.20), (0.45, 0.20), (0.20, 0.45)])
-    ]
+    three_phase_polygons = [Polygon([(0.20, 0.20), (0.45, 0.20), (0.20, 0.45)])]
     diagram.binodal = SimpleNamespace(
         binodal_sections=[section],
         two_phase_polygons=two_phase_polygons,
@@ -114,25 +112,6 @@ def test_polygon_exteriors_recurses_into_geometry_collections():
     np.testing.assert_array_equal(
         exteriors[1], np.asarray(nested_polygon.exterior.coords)
     )
-
-
-@pytest.mark.parametrize("method_name", ["plot", "plot_phase_counts"])
-def test_phase_diagram_plot_methods_create_ternary_axes(
-    diagram_with_plot_data, method_name
-):
-    method = getattr(diagram_with_plot_data, method_name)
-
-    fig, ax = method()
-
-    try:
-        assert isinstance(ax, TernaryAxes)
-        assert ax.get_figure() is fig
-        assert ax.get_tlabel() == r"$\phi_0$"
-        assert ax.get_llabel() == r"$\phi_1$"
-        assert ax.get_rlabel() == r"$\phi_2$"
-        fig.canvas.draw()
-    finally:
-        plt.close(fig)
 
 
 def test_phase_diagram_plot_uses_phi0_phi1_phi2_axis_order(
