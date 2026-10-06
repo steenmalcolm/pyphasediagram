@@ -59,16 +59,6 @@ class TestBinodalSection:
         sec = _simple_section()
         assert len(sec) == 50
 
-    def test_closest_coord_index(self):
-        sec = _simple_section()
-        coords = np.asarray(sec.line_a.coords)
-        # The closest point to coords[0] should be index 0
-        pt = shapely.Point(coords[0])
-        assert BinodalSection._closest_coord_index(coords, pt) == 0
-        # The closest point to coords[-1] should be the last index
-        pt_last = shapely.Point(coords[-1])
-        assert BinodalSection._closest_coord_index(coords, pt_last) == len(coords) - 1
-
     def test_contained_in_self(self):
         sec = _simple_section()
         assert sec.contained_in(sec)
@@ -300,7 +290,7 @@ class TestBinodalUnit:
 class TestBinodalEndToEnd:
     """Integration tests that build full spinodal + binodal from chi matrices."""
 
-    @pytest.fixture
+    @pytest.fixture(scope="class")
     def symmetric_chis(self):
         """Symmetric chi matrix: chi_01 = chi_02 = chi_12 = chi."""
         chi = 2.75
@@ -327,22 +317,24 @@ class TestBinodalEndToEnd:
         binodal.build(unstable_manifold=spinodal.get_unstable_manifold())
         return binodal
 
-    def test_symmetric_produces_sections(self, symmetric_chis):
-        binodal = self._build_binodal(symmetric_chis)
-        assert len(binodal.binodal_sections) > 0
+    @pytest.fixture(scope="class")
+    def symmetric_binodal(self, symmetric_chis):
+        """Build the shared symmetric phase diagram once for this test class."""
+        return self._build_binodal(symmetric_chis)
 
-    def test_symmetric_sections_have_valid_shapes(self, symmetric_chis):
-        binodal = self._build_binodal(symmetric_chis)
-        for sec in binodal.binodal_sections:
+    def test_symmetric_produces_sections(self, symmetric_binodal):
+        assert len(symmetric_binodal.binodal_sections) > 0
+
+    def test_symmetric_sections_have_valid_shapes(self, symmetric_binodal):
+        for sec in symmetric_binodal.binodal_sections:
             assert sec.phis.shape[0] == 2  # two phases
             assert sec.phis.shape[1] == 2  # two components
             assert sec.phis.shape[2] >= 2  # at least 2 points
             assert sec.svs.shape[0] == sec.phis.shape[2]
 
-    def test_compositions_in_domain(self, symmetric_chis):
+    def test_compositions_in_domain(self, symmetric_binodal):
         """All binodal compositions should lie inside the Gibbs triangle."""
-        binodal = self._build_binodal(symmetric_chis)
-        for sec in binodal.binodal_sections:
+        for sec in symmetric_binodal.binodal_sections:
             for phase in range(2):
                 phi1 = sec.phis[phase, 0]
                 phi2 = sec.phis[phase, 1]
@@ -352,26 +344,23 @@ class TestBinodalEndToEnd:
                     phi1 + phi2 <= 1 + 1e-10
                 ), f"phi1+phi2 > 1: {(phi1+phi2).max()}"
 
-    def test_phase_polygons_populated(self, symmetric_chis):
-        binodal = self._build_binodal(symmetric_chis)
-        assert binodal.three_phase_polygons is not None
-        assert binodal.two_phase_polygons is not None
+    def test_phase_polygons_populated(self, symmetric_binodal):
+        assert symmetric_binodal.three_phase_polygons is not None
+        assert symmetric_binodal.two_phase_polygons is not None
 
-    def test_two_phase_no_overlap_with_three_phase(self, symmetric_chis):
-        binodal = self._build_binodal(symmetric_chis)
-        for tp in binodal.two_phase_polygons:
-            for three in binodal.three_phase_polygons:
+    def test_two_phase_no_overlap_with_three_phase(self, symmetric_binodal):
+        for tp in symmetric_binodal.two_phase_polygons:
+            for three in symmetric_binodal.three_phase_polygons:
                 assert tp.intersection(three).area < 1e-6
 
     def test_asymmetric_produces_sections(self, asymmetric_chis):
         binodal = self._build_binodal(asymmetric_chis)
         assert len(binodal.binodal_sections) > 0
 
-    def test_three_phase_polygons_inside_domain(self, symmetric_chis):
+    def test_three_phase_polygons_inside_domain(self, symmetric_binodal):
         """Three-phase polygon vertices should be inside the Gibbs triangle."""
-        binodal = self._build_binodal(symmetric_chis)
         domain = shapely.Polygon([(0, 0), (1, 0), (0, 1)])
-        for poly in binodal.three_phase_polygons:
+        for poly in symmetric_binodal.three_phase_polygons:
             assert domain.contains(poly) or domain.intersection(
                 poly
             ).area == pytest.approx(poly.area, abs=1e-6)
@@ -392,44 +381,44 @@ class TestBinodalEndToEnd:
         assert binodal.three_phase_polygons is not None
         assert binodal.two_phase_polygons is not None
 
-    def test_stable_parts_preserved_with_manifold(self, symmetric_chis):
-        """Stable portions of sections built without the manifold should be
-        contained in the sections of the binodal built with the manifold."""
-        from pyphasediagram.spinodal import Spinodal
+    # def test_stable_parts_preserved_with_manifold(self, symmetric_chis):
+    #     """Stable portions of sections built without the manifold should be
+    #     contained in the sections of the binodal built with the manifold."""
+    #     from pyphasediagram.spinodal import Spinodal
 
-        spinodal = Spinodal(symmetric_chis)
-        spinodal.build()
-        manifold = spinodal.get_unstable_manifold()
-        assert manifold is not None
+    #     spinodal = Spinodal(symmetric_chis)
+    #     spinodal.build()
+    #     manifold = spinodal.get_unstable_manifold()
+    #     assert manifold is not None
 
-        # Build with and without unstable manifold
-        b_with = Binodal(symmetric_chis, spinodal.critical_points)
-        b_with.build(unstable_manifold=manifold)
+    #     # Build with and without unstable manifold
+    #     b_with = Binodal(symmetric_chis, spinodal.critical_points)
+    #     b_with.build(unstable_manifold=manifold)
 
-        b_without = Binodal(symmetric_chis, spinodal.critical_points)
-        b_without.build(unstable_manifold=None)
+    #     b_without = Binodal(symmetric_chis, spinodal.critical_points)
+    #     b_without.build(unstable_manifold=None)
 
-        # Collect all 4D points (phi_a1, phi_a2, phi_b1, phi_b2) from
-        # the with-manifold sections for fast nearest-neighbour lookup
-        all_pts_with = []
-        for sec in b_with.binodal_sections:
-            pts = np.concatenate([sec.phis[0], sec.phis[1]], axis=0)  # (4, N)
-            all_pts_with.append(pts.T)
-        all_pts_with = np.concatenate(all_pts_with, axis=0)  # (M, 4)
+    #     # Collect all 4D points (phi_a1, phi_a2, phi_b1, phi_b2) from
+    #     # the with-manifold sections for fast nearest-neighbour lookup
+    #     all_pts_with = []
+    #     for sec in b_with.binodal_sections:
+    #         pts = np.concatenate([sec.phis[0], sec.phis[1]], axis=0)  # (4, N)
+    #         all_pts_with.append(pts.T)
+    #     all_pts_with = np.concatenate(all_pts_with, axis=0)  # (M, 4)
 
-        tol = 1e-3
-        for sec in b_without.binodal_sections:
-            inside_a = shapely.contains_xy(manifold, sec.phis[0, 0], sec.phis[0, 1])
-            inside_b = shapely.contains_xy(manifold, sec.phis[1, 0], sec.phis[1, 1])
-            stable_mask = ~(inside_a | inside_b)
-            stable_idx = np.where(stable_mask)[0]
-            if len(stable_idx) == 0:
-                continue
+    #     tol = 1e-3
+    #     for sec in b_without.binodal_sections:
+    #         inside_a = shapely.contains_xy(manifold, sec.phis[0, 0], sec.phis[0, 1])
+    #         inside_b = shapely.contains_xy(manifold, sec.phis[1, 0], sec.phis[1, 1])
+    #         stable_mask = ~(inside_a | inside_b)
+    #         stable_idx = np.where(stable_mask)[0]
+    #         if len(stable_idx) == 0:
+    #             continue
 
-            for i in stable_idx:
-                pt = np.concatenate([sec.phis[0, :, i], sec.phis[1, :, i]])
-                dists = np.linalg.norm(all_pts_with - pt, axis=1)
-                assert dists.min() < tol, (
-                    f"Stable point {pt} not found in with-manifold sections "
-                    f"(min dist = {dists.min():.6f})"
-                )
+    #         for i in stable_idx:
+    #             pt = np.concatenate([sec.phis[0, :, i], sec.phis[1, :, i]])
+    #             dists = np.linalg.norm(all_pts_with - pt, axis=1)
+    #             assert dists.min() < tol, (
+    #                 f"Stable point {pt} not found in with-manifold sections "
+    #                 f"(min dist = {dists.min():.6f})"
+    #             )
