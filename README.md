@@ -16,4 +16,4 @@ pip install -e .
 ```
 
 ## Usage
-There is a short tutorial in the `notebooks` folder.
+There is a simple example in the `examples` folder.
