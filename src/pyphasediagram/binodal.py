@@ -1,3 +1,12 @@
+"""Construct and analyze binodal curves for ternary mixtures.
+
+The module traces paired coexistence branches in the two
+composition coordinates, detects candidate three-phase regions from branch
+intersections, and constructs polygonal two- and three-phase regions. It also
+provides helpers for plotting the resulting geometry and selecting a discrete
+phase decomposition for a prescribed mean composition.
+"""
+
 import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
@@ -6,12 +15,50 @@ import shapely
 from pyphasediagram.point import BinodalInitialPoint, CriticalPoint
 from pyphasediagram.stepper import Stepper
 
+
 # TODO: Additional duplicate section removal after task list is exhausted and unstable manifold is removed.
-
-
 class BinodalSection:
+    r"""Store one traced section of a two-phase coexistence curve.
+
+    Parameters
+    ----------
+    phis : numpy.ndarray
+        Coexisting compositions with shape ``(2, 2, n_points)``. The axes
+        identify phase, independent component, and position along the traced
+        section, respectively.
+    svs : numpy.ndarray
+        Smallest residual-Jacobian singular value at each trace point, with
+        shape ``(n_points,)``. This is used to determine branching points
+
+    Attributes
+    ----------
+    phis : numpy.ndarray
+        Coexisting compositions supplied to the constructor.
+    svs : numpy.ndarray
+        Singular-value history supplied to the constructor.
+    line_a : shapely.LineString
+        Composition-space curve traced by phase A.
+    line_b : shapely.LineString
+        Composition-space curve traced by phase B.
+
+    Raises
+    ------
+    ValueError
+        If ``phis`` and ``svs`` have different numbers of trace points.
+
+    Notes
+    -----
+    For trace index :math:`k`, ``phis[:, :, k]`` contains the endpoints of
+    one tie line. At least two trace points are expected. The constructor
+    assumes that ``phis`` has shape ``(2, 2, n_points)`` and validates that
+    ``svs`` contains one value per trace point. The Shapely lines and cached
+    coordinates are created at initialization and do not track later
+    mutations of ``phis``.
+    """
 
     def __init__(self, phis: np.ndarray, svs: np.ndarray):
+        if phis.shape[2] != len(svs):
+            raise ValueError("phis and svs must have the same number of trace points")
         self.phis = phis
         self.svs = svs
         self.line_a = shapely.LineString(phis[0].T)
@@ -20,6 +67,30 @@ class BinodalSection:
         self._coords = tuple(np.asarray(line.coords) for line in self._lines)
 
     def plot(self, colora="red", colorb="blue", is_tie_lines=False, **kwargs):
+        """Plot both coexistence branches on the current axes.
+
+        Parameters
+        ----------
+        colora : color, optional
+            Matplotlib color used for the phase-A branch.
+        colorb : color, optional
+            Matplotlib color used for the phase-B branch.
+        is_tie_lines : bool, optional
+            Whether to draw gray lines between corresponding phase
+            compositions.
+        **kwargs
+            Additional keyword arguments passed to
+            :func:`matplotlib.pyplot.plot` for both coexistence branches.
+
+        Returns
+        -------
+        None
+
+        Notes
+        -----
+        Tie lines are subsampled with a stride of
+        ``max(1, n_points // 20)`` to reduce visual clutter.
+        """
         plt.plot(self.phis[0, 0], self.phis[0, 1], color=colora, **kwargs)
         plt.plot(self.phis[1, 0], self.phis[1, 1], color=colorb, **kwargs)
         if is_tie_lines:
@@ -34,10 +105,28 @@ class BinodalSection:
 
     @staticmethod
     def _interpolate_on_segment(coords: np.ndarray, point) -> tuple[int, float]:
-        """Find the nearest line segment and return (seg_index, t).
+        r"""Locate a point on the nearest segment of a polyline.
 
-        ``seg_index`` is the start-vertex index of the closest segment and
-        ``t`` in [0, 1] is the interpolation parameter along that segment.
+        Parameters
+        ----------
+        coords : numpy.ndarray
+            Ordered polyline vertices with shape ``(n_vertices, 2)``.
+        point : shapely.Point
+            Point whose nearest projected position is requested.
+
+        Returns
+        -------
+        segment_index : int
+            Index of the first vertex of the nearest segment.
+        t : float
+            Clipped interpolation coordinate :math:`t \in [0, 1]`, where
+            ``coords[segment_index]`` corresponds to zero and the following
+            vertex corresponds to one.
+
+        Notes
+        -----
+        Squared segment lengths are bounded below by ``1e-30`` so repeated
+        neighboring vertices can be handled without division by zero.
         """
         point_xy = np.array([point.x, point.y])
         seg_starts = coords[:-1]
@@ -55,6 +144,31 @@ class BinodalSection:
         return best, float(t[best])
 
     def _intersection_params(self, self_idx: int, other, other_idx: int):
+        """Find interpolation coordinates at intersections of two branches.
+
+        Parameters
+        ----------
+        self_idx : {0, 1}
+            Branch index from this section.
+        other : BinodalSection
+            Section providing the second branch.
+        other_idx : {0, 1}
+            Branch index from ``other``.
+
+        Returns
+        -------
+        list of tuple
+            Tuples ``(self_segment, self_t, other_segment, other_t)`` for
+            every point intersection. Segment entries are integers and the
+            interpolation entries are floats in the closed interval
+            ``[0, 1]``.
+
+        Notes
+        -----
+        Disjoint bounding boxes are rejected before performing the Shapely
+        intersection. Only ``Point`` and ``MultiPoint`` results are retained;
+        overlapping line segments are ignored.
+        """
         line_1 = self._lines[self_idx]
         line_2 = other._lines[other_idx]
 
@@ -83,7 +197,32 @@ class BinodalSection:
         ]
 
     def intersects_with(self, other):
-        """Check if this binodal section intersects with another binodal section by checking if their corresponding lines intersect using shapely."""
+        """Construct three-phase candidates from branch intersections.
+
+        Parameters
+        ----------
+        other : BinodalSection
+            Section to intersect with this section.
+
+        Returns
+        -------
+        list of tuple of numpy.ndarray
+            Candidate triples of phase compositions. Each tuple contains
+            three arrays with shape ``(2,)``: the intersecting composition,
+            its partner phase on this section, and the partner phase on
+            ``other``.
+
+        Raises
+        ------
+        NotImplementedError
+            If ``other`` is not a :class:`BinodalSection`.
+
+        Notes
+        -----
+        All four pairings of the phase-A and phase-B branches are tested.
+        Coordinates between trace points are obtained by linear
+        interpolation along both paired branches.
+        """
         if not isinstance(other, BinodalSection):
             raise NotImplementedError(
                 "intersects_with can only be computed between BinodalSection instances."
@@ -110,7 +249,34 @@ class BinodalSection:
         return tp_points
 
     def contained_in(self, other, n_samples=1000):
-        """Check if this binodal section is contained within another binodal section by"""
+        r"""Check whether this section approximately duplicates another.
+
+        Parameters
+        ----------
+        other : BinodalSection
+            Reference section against which this section is compared.
+        n_samples : int, optional
+            Number of equally spaced arc-length samples taken from each
+            branch of this section.
+
+        Returns
+        -------
+        bool
+            ``True`` when the mean distances from both sampled branches to
+            the corresponding branches of ``other`` are below :math:`10^{-3}`.
+
+        Raises
+        ------
+        NotImplementedError
+            If ``other`` is not a :class:`BinodalSection`.
+
+        Notes
+        -----
+        Both assignments of this section's phase labels are tested because
+        coexistence is invariant under exchanging phases A and B. The test is
+        directional: it samples this section and measures distances to
+        ``other``, but not conversely.
+        """
         if not isinstance(other, BinodalSection):
             raise NotImplementedError(
                 "contained_in can only be computed between BinodalSection instances."
@@ -132,7 +298,27 @@ class BinodalSection:
     def _degenerate_points(
         self, sv_branch_threshold: float = 1e-2
     ) -> list[BinodalInitialPoint]:
-        """Identify points where the null space of the Jacobian has dimension greater than 1, which indicates branching"""
+        """Find candidate branching points from singular-value minima.
+
+        Parameters
+        ----------
+        sv_branch_threshold : float, optional
+            Exclusive upper bound on a local minimum of :attr:`svs` for it to
+            be treated as a degeneracy.
+
+        Returns
+        -------
+        list of BinodalInitialPoint
+            Candidate initial states located at qualifying local minima. The
+            tracing direction is estimated from the neighboring coexistence
+            states by a centered difference.
+
+        Notes
+        -----
+        A small singular value indicates that the residual Jacobian may have
+        a null space of dimension greater than one, as expected at a branch
+        point.
+        """
         degenerate_points = []
         extrema_idx = np.where(np.diff(np.sign(np.diff(self.svs))) == 2)[0] + 1
         for idx in extrema_idx:
@@ -146,15 +332,49 @@ class BinodalSection:
         return degenerate_points
 
     def __len__(self):
+        """Return the number of sampled coexistence states in the section."""
         return self.phis.shape[2]
 
 
 class Binodal:
+    """Trace and organize the coexistence regions of a ternary mixture.
+
+    Parameters
+    ----------
+    chis : numpy.ndarray
+        Reduced interaction matrix with shape ``(2, 2)`` for the two
+        independent composition coordinates.
+    critical_points : list of CriticalPoint, optional
+        Spinodal critical points used as additional seeds for tracing
+        coexistence sections.
+
+    Attributes
+    ----------
+    SV_BRANCH_THRESHOLD : float
+        Singular-value threshold used to identify candidate branch points.
+    chis : numpy.ndarray
+        Reduced interaction matrix supplied to the constructor.
+    critical_points : list of CriticalPoint
+        Critical-point seeds supplied to the constructor.
+    binodal_sections : list of BinodalSection
+        Accepted coexistence-curve sections. The list is empty until sections
+        are built.
+    three_phase_polygons : list of shapely.Polygon or None
+        Candidate three-phase regions, or ``None`` before polygon
+        construction.
+    two_phase_polygons : list of shapely geometry or None
+        Polygonal two-phase regions, or ``None`` before polygon construction.
+
+    Notes
+    -----
+    Call :meth:`build` to trace the coexistence sections and populate the
+    polygon collections. The input interaction matrix and critical-point list
+    are stored without copying.
+    """
 
     SV_BRANCH_THRESHOLD = 1e-2
 
     def __init__(self, chis: np.ndarray, critical_points: list[CriticalPoint] = []):
-        """Initialize the Binodal class with a 2x2 matrix of chi parameters"""
         self.chis = chis
         self.critical_points = critical_points
         self.binodal_sections: list[BinodalSection] = []
@@ -165,8 +385,29 @@ class Binodal:
         self._bipt_hist: list[BinodalInitialPoint] = []
 
     def _build_section(self, phi_init, v_init):
-        """
-        Build a section of the binodal curve starting from an initial composition phi_init and initial step v_init. This method runs the stepper to compute the binodal points along the section and adds them as nodes in the binodal graph, connecting consecutive points with edges.
+        """Trace and store one coexistence-curve section.
+
+        Parameters
+        ----------
+        phi_init : numpy.ndarray
+            Initial phase compositions with shape ``(4,)`` and ordering
+            ``[phi1_a, phi2_a, phi1_b, phi2_b]``.
+        v_init : numpy.ndarray
+            Initial tracing direction with shape ``(4,)`` and matching
+            coordinate ordering.
+
+        Returns
+        -------
+        bool
+            ``True`` if a section was accepted and stored; ``False`` if the
+            trace contained fewer than three points or approximately
+            duplicated an existing section.
+
+        Notes
+        -----
+        Accepted sections contribute newly detected branch-point seeds to the
+        pending task list. Their initial states are also recorded so similar
+        seeds can be skipped later.
         """
         # Run the stepper to compute the binodal points along the section
         phis, svs, flags = self._stepper.run(phi_init, v_init)
@@ -194,9 +435,27 @@ class Binodal:
         return True
 
     def build(self, unstable_manifold: shapely.Polygon = None) -> None:
-        """
-        Build the binodal curve as a graph with nodes representing points (phi1a, phi2a, phi1b, phi2b) on the curve.
-        Edges connect consecutive points along the curve. The graph is stored in self.binodal_graph.
+        """Build the binodal sections and phase-region polygons.
+
+        Parameters
+        ----------
+        unstable_manifold : Shapely polygonal geometry or None, optional
+            Locally unstable composition region. Trace points for which either
+            coexisting phase lies strictly inside this geometry are removed.
+            If ``None``, no stability-based filtering is performed.
+
+        Returns
+        -------
+        None
+
+        Notes
+        -----
+        Tracing is seeded from every demixing binary limit and from
+        :attr:`critical_points`. Newly detected branch points are processed
+        until the task list is exhausted. The resulting sections are then
+        filtered, deduplicated, and converted into two- and three-phase
+        polygonal regions. Existing section and seed history is not cleared,
+        so a fresh instance should be used when a complete rebuild is needed.
         """
         # Sections from binary limits
         for which_comp in range(3):
@@ -220,7 +479,18 @@ class Binodal:
         self._find_phase_polygons()
 
     def _remove_duplicate_sections(self):
-        """Remove duplicate binodal sections where one is contained in another."""
+        """Remove sections approximately contained in another section.
+
+        Returns
+        -------
+        None
+
+        Notes
+        -----
+        Approximate containment is evaluated by
+        :meth:`BinodalSection.contained_in`. Pair bookkeeping prevents both
+        members of a mutually contained pair from being removed.
+        """
         unique_sections = []
         duplicate_pair_idxs = []
         for i, section in enumerate(self.binodal_sections):
@@ -240,7 +510,28 @@ class Binodal:
     def _find_branching_points(
         self, section: BinodalSection
     ) -> list[BinodalInitialPoint]:
-        """Identify points where the null space of the Jacobian has dimension greater than 1, which indicates branching"""
+        """Refine branch-point candidates from a binodal section.
+
+        Parameters
+        ----------
+        section : BinodalSection
+            Newly traced section to inspect for degeneracies.
+
+        Returns
+        -------
+        list of BinodalInitialPoint
+            Initial states displaced along the secondary null-space direction
+            at accepted branch points.
+
+        Notes
+        -----
+        Candidates come from local singular-value minima below
+        :attr:`SV_BRANCH_THRESHOLD`. A candidate is accepted when its current
+        direction has a dot product greater than ``0.98`` with the primary
+        right-null vector and the smallest Jacobian singular value remains
+        below the threshold. The new state is displaced by ``1e-3`` along the
+        secondary right-null vector.
+        """
         branching_points: list[BinodalInitialPoint] = []
         for bp in section._degenerate_points(self.SV_BRANCH_THRESHOLD):
             J = self._stepper._jac_fn(bp.phi_init)
@@ -253,10 +544,43 @@ class Binodal:
         return branching_points
 
     def _find_phase_polygons(self):
+        """Construct the three-phase and two-phase polygon collections.
+
+        Returns
+        -------
+        None
+        """
         self._find_three_phase_polygons()
         self._find_two_phase_polygons()
 
     def _find_three_phase_polygons(self, overlap_threshold: float = 0.98):
+        r"""Construct candidate three-phase polygons from section crossings.
+
+        Parameters
+        ----------
+        overlap_threshold : float, optional
+            Exclusive overlap fraction above which a candidate is considered
+            a duplicate of an existing polygon.
+
+        Returns
+        -------
+        None
+
+        Notes
+        -----
+        Every nondegenerate candidate triple returned by
+        :meth:`BinodalSection.intersects_with` defines a triangle. Candidates
+        with area below :math:`10^{-10}` are discarded. For intersecting
+        candidates :math:`A` and existing polygons :math:`B`, the duplicate
+        measure is
+
+        .. math::
+
+           \frac{\operatorname{area}(A \cap B)}
+                {\min(\operatorname{area}(A), \operatorname{area}(B))}.
+
+        This method replaces the existing :attr:`three_phase_polygons` list.
+        """
         self.three_phase_polygons = []
         for i, section_a in enumerate(self.binodal_sections):
             for j, section_b in enumerate(self.binodal_sections):
@@ -281,6 +605,24 @@ class Binodal:
                         self.three_phase_polygons.append(poly)
 
     def _find_two_phase_polygons(self):
+        r"""Construct polygonal regions associated with two-phase coexistence.
+
+        Returns
+        -------
+        None
+
+        Notes
+        -----
+        If necessary, three-phase polygons are constructed first. Each
+        binodal section is closed by traversing its phase-A branch forward and
+        its phase-B branch in reverse. Geometries with area below
+        :math:`10^{-6}` are discarded, three-phase regions are subtracted, and
+        intersecting two-phase geometries are merged.
+
+        Geometry repair, subtraction, and union may produce polygonal geometry
+        types other than ``shapely.Polygon``. This method replaces the
+        existing :attr:`two_phase_polygons` list.
+        """
         if self.three_phase_polygons is None:
             self._find_three_phase_polygons()
 
@@ -312,6 +654,27 @@ class Binodal:
                 self.two_phase_polygons.append(poly)
 
     def _remove_unstable_sections(self, unstable_manifold: shapely.Polygon = None):
+        """Remove trace samples that enter a locally unstable region.
+
+        Parameters
+        ----------
+        unstable_manifold : Shapely geometry or None, optional
+            Polygonal region to exclude. If ``None``, the section collection
+            is left unchanged.
+
+        Returns
+        -------
+        None
+
+        Notes
+        -----
+        A sample is removed when either of its two phase compositions lies
+        strictly inside ``unstable_manifold``. Polygon boundaries are
+        retained. Each section is split into contiguous runs of retained
+        samples, and runs containing fewer than two samples are discarded.
+        Splitting occurs only at existing trace samples; no boundary
+        intersections are inserted.
+        """
         if unstable_manifold is None:
             return
         stable_sections = []
@@ -346,7 +709,32 @@ class Binodal:
         self.binodal_sections = stable_sections
 
     def _free_energy(self, phi: np.ndarray) -> float:
-        """Compute the dimensionless free energy density for a composition [phi1, phi2]."""
+        r"""Evaluate the dimensionless free-energy expression used for ranking.
+
+        Parameters
+        ----------
+        phi : numpy.ndarray
+            Independent composition coordinates
+            :math:`\boldsymbol{\phi} = (\phi_1, \phi_2)` with shape ``(2,)``.
+
+        Returns
+        -------
+        float
+            Dimensionless free-energy density.
+
+        Notes
+        -----
+        With :math:`\phi_0 = 1 - \phi_1 - \phi_2` and reduced interaction
+        matrix :math:`C =` ``chis``, this method evaluates
+
+        .. math::
+
+           f(\boldsymbol{\phi}) = \sum_{i=0}^{2} \phi_i \ln \phi_i
+           + \boldsymbol{\phi}^{\mathsf{T}} C\boldsymbol{\phi}.
+
+        The logarithms require all three compositions to be positive for a
+        finite real result. The method performs no domain validation.
+        """
         phi_1, phi_2 = phi[0], phi[1]
         phi_0 = 1.0 - phi_1 - phi_2
         return (
@@ -360,25 +748,49 @@ class Binodal:
     def decomposition_from_composition(
         self, phi_means: np.ndarray
     ) -> tuple[np.ndarray | None, float | None]:
-        """Given mean composition, return the coexisting phase compositions that
-        the system decomposes into.
-
-        If ``phi_means`` lies inside a three-phase polygon **and** that
-        decomposition has lower free energy than any two-phase tie line, the
-        three vertices of the polygon are returned.  Otherwise the best
-        two-phase tie line through ``phi_means`` is returned.
+        r"""Select candidate coexisting phases for a mean composition.
 
         Parameters
         ----------
-        phi_means : np.ndarray
-            Mean composition [phi1, phi2].
+        phi_means : array-like
+            Mean independent composition coordinates with shape ``(2,)`` and
+            ordering ``[phi1, phi2]``.
 
         Returns
         -------
-        alt : np.ndarray or None
-            Coexisting phase compositions. Shape (2, 3) for three-phase, (2, 2) for two-phase, or None if no decomposition found.
-        f_alt : float or None
-            Free energy of the decomposition. None if no decomposition found.
+        phase_compositions : numpy.ndarray or None
+            Coexisting phase compositions. A three-phase result has shape
+            ``(3, 2)`` and a two-phase result has shape ``(2, 2)``; rows
+            identify phases and columns identify independent components.
+            ``None`` is returned if no candidate is found.
+        free_energy : float or None
+            Weighted free energy of the selected decomposition, or ``None``
+            if no candidate is found.
+
+        Notes
+        -----
+        Call :meth:`build` before this method so that three-phase polygons are
+        available. For a mean composition strictly inside a three-phase
+        polygon, phase fractions :math:`v_q` are obtained from the lever rule
+
+        .. math::
+
+           \overline{\boldsymbol{\phi}}
+           = \sum_q v_q\boldsymbol{\phi}^{(q)},
+           \qquad \sum_q v_q = 1,
+
+        and the candidate free energy is
+
+        .. math::
+
+           f_{\mathrm{mix}} = \sum_q v_q f(\boldsymbol{\phi}^{(q)}).
+
+        Two-phase candidates are selected from the discrete tie lines stored
+        in each section. The closest tie line whose orthogonal projection
+        parameter lies in ``[0, 1]`` is considered; adjacent tie lines are not
+        interpolated, and exact incidence of the mean composition on the tie
+        line is not required. The lowest-free-energy candidate is returned,
+        without comparison against the homogeneous state's free energy.
         """
         phi_means = np.asarray(phi_means, dtype=float)
         pt = shapely.Point(phi_means)
@@ -460,6 +872,18 @@ class Binodal:
             return None, None
 
     def plot_sections(self, **kwargs):
+        """Plot every stored binodal section on the current axes.
+
+        Parameters
+        ----------
+        **kwargs
+            Plot options forwarded to :meth:`BinodalSection.plot`. The first
+            section is labeled ``"Binodal curve"``.
+
+        Returns
+        -------
+        None
+        """
         for i, section in enumerate(self.binodal_sections):
             if i == 0:
                 section.plot(label="Binodal curve", **kwargs)
@@ -467,6 +891,25 @@ class Binodal:
                 section.plot(**kwargs)
 
     def plot_polygons(self, **kwargs):
+        """Plot the two- and three-phase regions on the current axes.
+
+        Parameters
+        ----------
+        **kwargs
+            Additional keyword arguments passed to
+            :func:`matplotlib.pyplot.fill`.
+
+        Returns
+        -------
+        None
+
+        Notes
+        -----
+        Missing polygon collections are constructed automatically.
+        Three-phase regions are filled in blue and two-phase regions in
+        orange, both with an opacity of ``0.5``. This plotting helper expects
+        each stored geometry to expose a polygon ``exterior``.
+        """
         if self.three_phase_polygons is None or self.two_phase_polygons is None:
             self._find_phase_polygons()
 

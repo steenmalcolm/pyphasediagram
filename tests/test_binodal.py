@@ -50,6 +50,13 @@ class TestBinodalSection:
         assert sec.phis.shape == (2, 2, 50)
         assert sec.svs.shape == (50,)
 
+    def test_init_rejects_incompatible_phis_and_svs_lengths(self):
+        phis = _simple_section().phis
+        svs = np.zeros(phis.shape[2] - 1)
+
+        with pytest.raises(ValueError, match="same number of trace points"):
+            BinodalSection(phis, svs)
+
     def test_lines_are_linestrings(self):
         sec = _simple_section()
         assert isinstance(sec.line_a, shapely.LineString)
