@@ -2,21 +2,53 @@ r"""High-level construction and visualization of ternary phase diagrams.
 
 The :class:`PhaseDiagram` facade combines spinodal and binodal calculations
 for an incompressible ternary mixture. It also provides convenience plots for
-the resulting coexistence curves, critical points, and phase regions in the
-two independent composition coordinates :math:`(\phi_1, \phi_2)`.
+the resulting coexistence curves, critical points, and phase regions on
+ternary axes.
 """
 
-from typing import Optional
+from typing import Iterable, Iterator
 
 import matplotlib.pyplot as plt
 import numpy as np
-import shapely
-from matplotlib.axes import Axes
 from matplotlib.figure import Figure
+from matplotlib.patches import Patch
+from mpltern import TernaryAxes
+from numpy.typing import ArrayLike
+from shapely.geometry.base import BaseGeometry
 
 from pyphasediagram.binodal import Binodal
 from pyphasediagram.spinodal import Spinodal
 from pyphasediagram.utils import reduce_chis
+
+
+def _polygon_exteriors(
+    geometries: Iterable[BaseGeometry],
+) -> Iterator[np.ndarray]:
+    """Yield exterior coordinates from the polygonal parts of geometries.
+
+    Parameters
+    ----------
+    geometries : iterable of shapely.geometry.base.BaseGeometry
+        Polygonal geometries or collections that may contain polygons.
+
+    Yields
+    ------
+    numpy.ndarray
+        Exterior coordinates of one polygon with shape ``(n, 2)``.
+
+    Notes
+    -----
+    Non-polygonal parts of geometry collections are ignored. Interior rings
+    are not returned because the phase-region plotting code currently draws
+    polygon exteriors only.
+    """
+    for geometry in geometries:
+        if geometry.is_empty:
+            continue
+        if geometry.geom_type == "Polygon":
+            yield np.asarray(geometry.exterior.coords)
+        elif hasattr(geometry, "geoms"):
+            yield from _polygon_exteriors(geometry.geoms)
 
 
 class PhaseDiagram:
@@ -57,6 +89,9 @@ class PhaseDiagram:
     :math:`(\phi_1, \phi_2)`. Incompressibility fixes the remaining fraction
     as :math:`\phi_0 = 1 - \phi_1 - \phi_2`.
 
+    Plotting methods place :math:`\phi_0`, :math:`\phi_1`, and :math:`\phi_2`
+    on the top, left, and right ternary axes, respectively.
+
     The interaction matrix has the form
 
     .. math::
@@ -79,6 +114,39 @@ class PhaseDiagram:
        + \phi_0\chi_{02}\phi_2
        + \phi_1\chi_{12}\phi_2.
     """
+
+    @staticmethod
+    def _to_ternary_coordinates(
+        phi1: ArrayLike, phi2: ArrayLike
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        r"""Convert independent compositions to ``mpltern`` coordinates.
+
+        Parameters
+        ----------
+        phi1 : array-like
+            Fraction of component 1.
+        phi2 : array-like
+            Fraction of component 2.
+
+        Returns
+        -------
+        phi0 : numpy.ndarray
+            Fraction of component 0, calculated as ``1 - phi1 - phi2``.
+        phi1 : numpy.ndarray
+            Fraction of component 1.
+        phi2 : numpy.ndarray
+            Fraction of component 2.
+
+        Notes
+        -----
+        ``mpltern`` expects the fractions on the top, left, and right axes.
+        This project assigns those axes to :math:`\phi_0`, :math:`\phi_1`,
+        and :math:`\phi_2`, respectively.
+        """
+        phi1 = np.asarray(phi1)
+        phi2 = np.asarray(phi2)
+        phi0 = 1.0 - phi1 - phi2
+        return phi0, phi1, phi2
 
     def __init__(self, chis: np.ndarray) -> None:
         chis = np.asarray(chis, dtype=float)
@@ -129,138 +197,119 @@ class PhaseDiagram:
         """
         pass
 
-    def plot_phase_counts(self, ax: Optional[Axes] = None) -> tuple[Figure, Axes]:
+    def plot_phase_counts(self) -> tuple[Figure, TernaryAxes]:
         """Plot the one-, two-, and three-phase regions.
-
-        Parameters
-        ----------
-        ax : matplotlib.axes.Axes, optional
-            Axes on which to draw. A new figure and axes are created when
-            omitted.
 
         Returns
         -------
         fig : matplotlib.figure.Figure
             Figure containing the phase-region plot.
-        ax : matplotlib.axes.Axes
-            Axes containing the phase-region plot.
+        ax : mpltern.TernaryAxes
+            Ternary axes containing the phase-region plot.
 
         Notes
         -----
         :meth:`build` must be called before this method. The full composition
         simplex is drawn as the one-phase background, with calculated two- and
-        three-phase polygons overlaid on it.
+        three-phase polygons overlaid on it. A new figure is created on every
+        call.
         """
-        from matplotlib.collections import PatchCollection
-        from matplotlib.patches import Patch
-        from matplotlib.patches import Polygon as MplPolygon
+        fig, ax = plt.subplots(subplot_kw={"projection": "ternary"})
+        self._draw_phase_counts(ax)
+        return fig, ax
 
-        if ax is None:
-            fig, ax = plt.subplots()
-        else:
-            fig = ax.get_figure()
+    def _draw_phase_counts(self, ax: TernaryAxes) -> None:
+        """Draw the phase-count regions on ternary axes.
+
+        Parameters
+        ----------
+        ax : mpltern.TernaryAxes
+            Ternary axes on which to draw.
+
+        Returns
+        -------
+        None
+        """
 
         ax.set_title("Phase regions")
-        colors = {"1 phase": "#2ca02c", "2 phases": "#1f77b4", "3 phases": "#d62728"}
-        alphas = {"1 phase": 0.5, "2 phases": 0.6, "3 phases": 0.7}
+        colors = {
+            "1 phase": "#2ca02c",
+            "2 phases": "#1f77b4",
+            "3 phases": "#d62728",
+        }
+        alphas = {"1 phase": 1.0, "2 phases": 1.0, "3 phases": 1.0}
 
         # One-phase region: full domain triangle
-        domain = MplPolygon([(0, 0), (0, 1), (1, 0)], closed=True)
-        ax.add_collection(
-            PatchCollection(
-                [domain],
-                facecolors="#2ca02c",
-                edgecolors="none",
-                alpha=0.5,
-                label="1 phase",
-            )
+        ax.fill(
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            facecolor=colors["1 phase"],
+            edgecolor="none",
+            alpha=alphas["1 phase"],
         )
 
         # Two-phase regions
-        two_patches = []
-        for poly in self.binodal.two_phase_polygons:
-            if poly.geom_type == "MultiPolygon":
-                for p in poly.geoms:
-                    two_patches.append(
-                        MplPolygon(np.array(p.exterior.coords), closed=True)
-                    )
-            else:
-                two_patches.append(
-                    MplPolygon(np.array(poly.exterior.coords), closed=True)
-                )
-        if two_patches:
-            ax.add_collection(
-                PatchCollection(
-                    two_patches,
-                    facecolors="#1f77b4",
-                    edgecolors="none",
-                    alpha=0.6,
-                    label="2 phases",
-                )
+        for coords in _polygon_exteriors(self.binodal.two_phase_polygons):
+            ax.fill(
+                *self._to_ternary_coordinates(coords[:, 0], coords[:, 1]),
+                facecolor=colors["2 phases"],
+                edgecolor="none",
+                alpha=alphas["2 phases"],
             )
 
         # Three-phase regions
-        three_patches = []
-        for poly in self.binodal.three_phase_polygons:
-            if poly.geom_type == "MultiPolygon":
-                for p in poly.geoms:
-                    three_patches.append(
-                        MplPolygon(np.array(p.exterior.coords), closed=True)
-                    )
-            else:
-                three_patches.append(
-                    MplPolygon(np.array(poly.exterior.coords), closed=True)
-                )
-        if three_patches:
-            ax.add_collection(
-                PatchCollection(
-                    three_patches,
-                    facecolors="#d62728",
-                    edgecolors="none",
-                    alpha=0.7,
-                    label="3 phases",
-                )
+        for coords in _polygon_exteriors(self.binodal.three_phase_polygons):
+            ax.fill(
+                *self._to_ternary_coordinates(coords[:, 0], coords[:, 1]),
+                facecolor=colors["3 phases"],
+                edgecolor="none",
+                alpha=alphas["3 phases"],
             )
 
-        ax.set_xlim(0, 1)
-        ax.set_ylim(0, 1)
-        ax.set_xlabel(r"$\phi_1$")
-        ax.set_ylabel(r"$\phi_2$")
-        ax.set_aspect("equal")
+        ax.set_tlabel(r"$\phi_0$")
+        ax.set_llabel(r"$\phi_1$")
+        ax.set_rlabel(r"$\phi_2$")
         ax.legend(
             handles=[
                 Patch(facecolor=c, alpha=alphas[l], label=l) for l, c in colors.items()
             ]
         )
-        return fig, ax
 
-    def plot(self, ax: Optional[Axes] = None) -> tuple[Figure, Axes]:
+    def plot(self) -> tuple[Figure, TernaryAxes]:
         """Plot coexistence curves and special points.
-
-        Parameters
-        ----------
-        ax : matplotlib.axes.Axes, optional
-            Axes on which to draw. A new figure and axes are created when
-            omitted.
 
         Returns
         -------
         fig : matplotlib.figure.Figure
             Figure containing the phase-diagram plot.
-        ax : matplotlib.axes.Axes
-            Axes containing the spinodal curves, binodal sections,
+        ax : mpltern.TernaryAxes
+            Ternary axes containing the spinodal curves, binodal sections,
             three-phase polygon vertices, and critical points.
 
         Notes
         -----
         :meth:`build` must be called before this method. Spinodal curves are
         dashed black lines, binodal branches are red, critical points are gold
-        stars, and three-phase polygon vertices are shown as markers.
+        stars, and three-phase polygon vertices are shown as markers. A new
+        figure is created on every call.
         """
-        if ax is None:
-            fig, ax = plt.subplots()
-        else:
-            fig = ax.get_figure()
+        fig, ax = plt.subplots(subplot_kw={"projection": "ternary"})
+        self._draw_phase_diagram(ax)
+        return fig, ax
+
+    def _draw_phase_diagram(self, ax: TernaryAxes) -> None:
+        """Draw coexistence curves and special points on ternary axes.
+
+        Parameters
+        ----------
+        ax : mpltern.TernaryAxes
+            Ternary axes on which to draw.
+
+        Returns
+        -------
+        None
+        """
 
         ax.set_title("Binodal & Spinodal")
         # Spinodal
@@ -270,26 +319,42 @@ class PhaseDiagram:
             sg = self.spinodal.spinodal_graph.subgraph(comp)
             phi1s, phi2s = self.spinodal._coords_from_subgraph(sg)
             label = "Spinodal" if i == 0 else None
-            ax.plot(phi1s, phi2s, "k--", label=label)
+            ax.plot(
+                *self._to_ternary_coordinates(phi1s, phi2s),
+                "k--",
+                label=label,
+            )
 
         # Binodal sections
         for i, section in enumerate(self.binodal.binodal_sections):
             label = "Binodal" if i == 0 else None
-            ax.plot(section.phis[0, 0], section.phis[0, 1], color="red", label=label)
-            ax.plot(section.phis[1, 0], section.phis[1, 1], color="red")
+            ax.plot(
+                *self._to_ternary_coordinates(section.phis[0, 0], section.phis[0, 1]),
+                color="red",
+                label=label,
+            )
+            ax.plot(
+                *self._to_ternary_coordinates(section.phis[1, 0], section.phis[1, 1]),
+                color="red",
+            )
 
         # Three-phase points
-        for i, poly in enumerate(self.binodal.three_phase_polygons):
-            coords = np.array(poly.exterior.coords)
-            label = "3-phase point" if i == 0 else None
-            ax.scatter(coords[:-1, 0], coords[:-1, 1], zorder=5, s=40, label=label)
+        # for i, coords in enumerate(
+        #     _polygon_exteriors(self.binodal.three_phase_polygons)
+        # ):
+        #     label = "3-phase point" if i == 0 else None
+        #     ax.scatter(
+        #         *self._to_ternary_coordinates(coords[:-1, 0], coords[:-1, 1]),
+        #         zorder=5,
+        #         s=40,
+        #         label=label,
+        #     )
 
         # Critical points
         for i, cp in enumerate(self.spinodal.critical_points):
             label = "Critical point" if i == 0 else None
             ax.scatter(
-                cp.phi1,
-                cp.phi2,
+                *self._to_ternary_coordinates(cp.phi1, cp.phi2),
                 marker="*",
                 color="gold",
                 edgecolors="k",
@@ -298,38 +363,37 @@ class PhaseDiagram:
                 label=label,
             )
 
-        ax.plot([0, 1], [1, 0], "k-", linewidth=0.5)
-        ax.set_xlim(0, 1)
-        ax.set_ylim(0, 1)
-        ax.set_xlabel(r"$\phi_1$")
-        ax.set_ylabel(r"$\phi_2$")
-        ax.set_aspect("equal")
+        ax.set_tlabel(r"$\phi_0$")
+        ax.set_llabel(r"$\phi_1$")
+        ax.set_rlabel(r"$\phi_2$")
         ax.legend()
-        return fig, ax
 
-    def plot_summary(self) -> tuple[Figure, tuple[Axes, Axes]]:
+    def plot_summary(self) -> tuple[Figure, tuple[TernaryAxes, TernaryAxes]]:
         """Plot curves and phase regions in a two-panel summary.
 
         Returns
         -------
         fig : matplotlib.figure.Figure
             Figure containing both summary panels.
-        axes : tuple of matplotlib.axes.Axes
-            Pair ``(curve_ax, region_ax)`` containing the coexistence-curve
-            plot and phase-region plot, respectively.
+        axes : tuple of mpltern.TernaryAxes
+            Pair ``(curve_ax, region_ax)`` containing the ternary
+            coexistence-curve plot and phase-region plot, respectively.
 
         Notes
         -----
         :meth:`build` must be called before this method. The figure title lists
-        the three independent entries of the reduced interaction matrix.
+        the three independent entries of the reduced interaction matrix. A
+        new figure is created on every call.
         """
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
-        fig.suptitle(
-            r"$(\chi_{11}, \chi_{12}, \chi_{22}) = "
-            + f"({self.chis[0, 0]:.5f}, {self.chis[0, 1]:.5f}, {self.chis[1, 1]:.5f})$"
+        fig, (ax1, ax2) = plt.subplots(
+            1, 2, figsize=(12, 5), subplot_kw={"projection": "ternary"}
         )
-        self.plot(ax=ax1)
-        self.plot_phase_counts(ax=ax2)
+        fig.suptitle(
+            r"$(\chi_{01}, \chi_{02}, \chi_{12}) = "
+            + f"({-self.chis[0, 0]/2:.4f}, {-self.chis[1, 1]/2:.4f}, {self.chis[0, 1]-self.chis[0, 0]/2-self.chis[1, 1]/2:.4f})$"
+        )
+        self._draw_phase_diagram(ax1)
+        self._draw_phase_counts(ax2)
         fig.tight_layout()
         return fig, (ax1, ax2)
 
