@@ -59,7 +59,7 @@ class BaseStepper(ABC):
     traced values.
     """
 
-    MAX_STEPS: int = int(1e50)
+    MAX_STEPS: int = int(1e5)
 
     # terminate once we are back at the initial point within tolerance
     CYCLE_MIN_STEPS = 10  # don't trigger immediately
