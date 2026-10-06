@@ -66,7 +66,7 @@ class BinodalSection:
         self._lines = (self.line_a, self.line_b)
         self._coords = tuple(np.asarray(line.coords) for line in self._lines)
 
-    def plot(self, colora="red", colorb="blue", is_tie_lines=False, **kwargs):
+    def plot(self, colora="red", colorb="blue", is_tie_lines=False, **kwargs) -> None:
         """Plot both coexistence branches on the current axes.
 
         Parameters
@@ -196,7 +196,7 @@ class BinodalSection:
             for point in points
         ]
 
-    def intersects_with(self, other):
+    def intersects_with(self, other) -> list[tuple[np.ndarray, np.ndarray, np.ndarray]]:
         """Construct three-phase candidates from branch intersections.
 
         Parameters
@@ -273,9 +273,8 @@ class BinodalSection:
         Notes
         -----
         Both assignments of this section's phase labels are tested because
-        coexistence is invariant under exchanging phases A and B. The test is
-        directional: it samples this section and measures distances to
-        ``other``, but not conversely.
+        coexistence is invariant under exchanging phases A and B. The test is directional
+        in that it only checks if this object is contained in ``other``, but not the reverse.
         """
         if not isinstance(other, BinodalSection):
             raise NotImplementedError(
@@ -345,8 +344,8 @@ class Binodal:
         Reduced interaction matrix with shape ``(2, 2)`` for the two
         independent composition coordinates.
     critical_points : list of CriticalPoint, optional
-        Spinodal critical points used as additional seeds for tracing
-        coexistence sections.
+        Spinodal critical points used as additional initial points for
+        tracing coexistence sections.
 
     Attributes
     ----------
@@ -355,7 +354,7 @@ class Binodal:
     chis : numpy.ndarray
         Reduced interaction matrix supplied to the constructor.
     critical_points : list of CriticalPoint
-        Critical-point seeds supplied to the constructor.
+        Critical-point initial points supplied to the constructor.
     binodal_sections : list of BinodalSection
         Accepted coexistence-curve sections. The list is empty until sections
         are built.
@@ -405,9 +404,9 @@ class Binodal:
 
         Notes
         -----
-        Accepted sections contribute newly detected branch-point seeds to the
-        pending task list. Their initial states are also recorded so similar
-        seeds can be skipped later.
+        Accepted sections contribute newly detected branch-point initial
+        points to the pending task list. Their initial states are also
+        recorded so similar initial points can be skipped later.
         """
         # Run the stepper to compute the binodal points along the section
         phis, svs, flags = self._stepper.run(phi_init, v_init)
@@ -450,11 +449,11 @@ class Binodal:
 
         Notes
         -----
-        Tracing is seeded from every demixing binary limit and from
-        :attr:`critical_points`. Newly detected branch points are processed
+        Tracing starts from initial points at every demixing binary limit and
+        from :attr:`critical_points`. Newly detected branch points are processed
         until the task list is exhausted. The resulting sections are then
         filtered, deduplicated, and converted into two- and three-phase
-        polygonal regions. Existing section and seed history is not cleared,
+        polygonal regions. Existing section and initial-point history is not cleared,
         so a fresh instance should be used when a complete rebuild is needed.
         """
         # Sections from binary limits
