@@ -92,12 +92,17 @@ class TestFreeEnergy:
         h = 1e-6
         grad = np.array(
             [
-                (free_energy(phi + h * e, chis_full) - free_energy(phi - h * e, chis_full))
+                (
+                    free_energy(phi + h * e, chis_full)
+                    - free_energy(phi - h * e, chis_full)
+                )
                 / (2 * h)
                 for e in np.eye(2)
             ]
         )
-        assert np.allclose(grad, exchange_chemical_potentials(phi, chis_full), atol=1e-6)
+        assert np.allclose(
+            grad, exchange_chemical_potentials(phi, chis_full), atol=1e-6
+        )
 
     @pytest.mark.parametrize("shape", [(3,), (1, 4), ()])
     def test_rejects_invalid_phi_shape(self, chis_full, shape):
@@ -140,7 +145,9 @@ class TestExchangeChemicalPotentials:
         phis = np.array([[0.1, 0.3, 0.5], [0.2, 0.4, 0.1]])
         mu = exchange_chemical_potentials(phis, chis_full)
         for k in range(3):
-            assert np.allclose(mu[:, k], exchange_chemical_potentials(phis[:, k], chis_full))
+            assert np.allclose(
+                mu[:, k], exchange_chemical_potentials(phis[:, k], chis_full)
+            )
 
     def test_matches_stepper_residual(self, chis_full):
         """The difference between two phases equals the stepper's chemical-potential residual."""

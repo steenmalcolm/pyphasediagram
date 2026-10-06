@@ -24,12 +24,12 @@ def reduce_chis(chis: ArrayLike) -> np.ndarray:
     Returns
     -------
     numpy.ndarray
-        Reduced interaction matrix :math:`C` with shape ``(2, 2)`` acting on
+        Reduced interaction matrix :math:`\chi` with shape ``(2, 2)`` acting on
         the independent compositions :math:`(\phi_1, \phi_2)`:
 
         .. math::
 
-           C = \begin{pmatrix}
+           \chi = \begin{pmatrix}
            -2\chi_{01} & \chi_{12} - \chi_{01} - \chi_{02} \\
            \chi_{12} - \chi_{01} - \chi_{02} & -2\chi_{02}
            \end{pmatrix}.
@@ -38,6 +38,14 @@ def reduce_chis(chis: ArrayLike) -> np.ndarray:
     ------
     ValueError
         If ``chis`` does not have shape ``(3, 3)`` or ``(2, 2)``.
+
+    Notes
+    -----
+    The Flory--Huggins parameter of the full interaction matrix appear in the free-energy density as
+
+    .. math::
+        f(\phi_0, \phi_1, \phi_2) = \phi_0 \ln \phi_0 + \phi_1 \ln \phi_1 + \phi_2 \ln \phi_2
+        + \phi_0 \chi_{01} \phi_1 + \phi_0 \chi_{02} \phi_2 + \phi_1 \chi_{12} \phi_2
     """
     chis = np.asarray(chis, dtype=float)
     if chis.shape == (2, 2):
