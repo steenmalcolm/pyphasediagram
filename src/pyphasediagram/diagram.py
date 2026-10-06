@@ -8,6 +8,7 @@ from matplotlib.figure import Figure
 
 from pyphasediagram.binodal import Binodal
 from pyphasediagram.spinodal import Spinodal
+from pyphasediagram.utils import reduce_chis
 
 
 class PhaseDiagram:
@@ -32,31 +33,7 @@ class PhaseDiagram:
     """
 
     def __init__(self, chis: np.ndarray) -> None:
-        chis = np.asarray(chis, dtype=float)
-        if len(chis) == 3:
-            chis = np.array(
-                [
-                    [-2 * chis[0, 1], chis[1, 2] - chis[0, 1] - chis[0, 2]],
-                    [chis[1, 2] - chis[0, 1] - chis[0, 2], -2 * chis[0, 2]],
-                ]
-            )
-        elif len(chis) != 2:
-            raise ValueError("chis must be a 2x2 or a 3x3 array")
-
-        self.chis = chis
-
-    def _free_energy(self, phi: np.ndarray) -> np.ndarray:
-        """Compute the dimensionless free energy density for given compositions."""
-        phi_1, phi_2 = phi[0], phi[1]
-        phi_0 = 1 - phi_1 - phi_2
-
-        f = (
-            phi_1 * np.log(phi_1)
-            + phi_2 * np.log(phi_2)
-            + phi_0 * np.log(phi_0)
-            + np.sum(phi * (self.chis @ phi), axis=0) / 2
-        )
-        return f
+        self.chis = reduce_chis(chis)
 
     def build(self, delta: float = 1e-3) -> None:
         """Build the phase diagram: compute binodals, map to (phi_d, phi_r), and find 3-phase points."""

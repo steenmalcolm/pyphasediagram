@@ -16,6 +16,7 @@ import shapely
 
 from pyphasediagram.point import BinodalInitialPoint, CriticalPoint
 from pyphasediagram.stepper import Stepper
+from pyphasediagram.utils import free_energy
 
 
 # TODO: Additional duplicate section removal after task list is exhausted and unstable manifold is removed.
@@ -725,42 +726,6 @@ class Binodal:
 
         self.binodal_sections = stable_sections
 
-    def _free_energy(self, phi: np.ndarray) -> float:
-        r"""Evaluate the dimensionless free-energy expression used for ranking.
-
-        Parameters
-        ----------
-        phi : numpy.ndarray
-            Independent composition coordinates
-            :math:`\boldsymbol{\phi} = (\phi_1, \phi_2)` with shape ``(2,)``.
-
-        Returns
-        -------
-        float
-            Dimensionless free-energy density.
-
-        Notes
-        -----
-        With :math:`\phi_0 = 1 - \phi_1 - \phi_2` and reduced interaction
-        matrix :math:`C =` ``chis``, this method evaluates
-
-        .. math::
-
-           f(\boldsymbol{\phi}) = \sum_{i=0}^{2} \phi_i \ln \phi_i
-           + \boldsymbol{\phi}^{\mathsf{T}} C\boldsymbol{\phi}.
-
-        The logarithms require all three compositions to be positive for a
-        finite real result. The method performs no domain validation.
-        """
-        phi_1, phi_2 = phi[0], phi[1]
-        phi_0 = 1.0 - phi_1 - phi_2
-        return (
-            phi_1 * np.log(phi_1)
-            + phi_2 * np.log(phi_2)
-            + phi_0 * np.log(phi_0)
-            + np.dot(phi, self.chis @ phi)
-        )
-
     # TODO: Currently only the closest tie line is selected. It would be better to do an interpolation between the two closest tie lines
     def decomposition_from_composition(
         self, phi_means: np.ndarray
@@ -831,7 +796,9 @@ class Binodal:
                 if np.any(vols < -1e-6):
                     continue
                 f = float(
-                    sum(v * self._free_energy(verts[i]) for i, v in enumerate(vols))
+                    sum(
+                        v * free_energy(verts[i], self.chis) for i, v in enumerate(vols)
+                    )
                 )
                 if f < best_f:
                     best_f = f
@@ -875,9 +842,9 @@ class Binodal:
 
             # Interpolated free energy at phi_means on this tie line
             alpha = t[idx]
-            f = (1.0 - alpha) * self._free_energy(
-                phi_a[:, idx]
-            ) + alpha * self._free_energy(phi_b[:, idx])
+            f = (1.0 - alpha) * free_energy(
+                phi_a[:, idx], self.chis
+            ) + alpha * free_energy(phi_b[:, idx], self.chis)
 
             if f < best_f:
                 best_f = f
