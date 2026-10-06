@@ -6,8 +6,11 @@ ternary mixture.  It also provides initial states near each binary edge of the
 composition triangle.
 """
 
+from typing import Optional
+
 import jax.numpy as jnp
 import numpy as np
+from numpy.typing import ArrayLike
 from scipy.optimize import root
 
 from pyphasediagram.stepper.base import BaseStepper
@@ -39,7 +42,7 @@ class Stepper(BaseStepper):
        \phi_0^{(\alpha)} = 1 - \phi_1^{(\alpha)} - \phi_2^{(\alpha)}.
     """
 
-    def __init__(self, chis):
+    def __init__(self, chis: ArrayLike) -> None:
         self.chis = jnp.asarray(chis)  # (2,2)
         super().__init__()
 
@@ -129,7 +132,7 @@ class Stepper(BaseStepper):
 
         return jnp.logical_or(close, invalid)
 
-    def binary_state(self, chi) -> float:
+    def binary_state(self, chi: float) -> Optional[float]:
         r"""Calculate the dilute fraction of a symmetric binary coexistence.
 
         The dense volume fraction follows from the incompressibility
@@ -174,7 +177,9 @@ class Stepper(BaseStepper):
             raise ValueError(f"Root finding failed: {sol.message}")
         return float(sol.x.item())
 
-    def binary_init(self, which_comp: int = 0) -> jnp.ndarray:
+    def binary_init(
+        self, which_comp: int = 0
+    ) -> tuple[Optional[np.ndarray], Optional[np.ndarray]]:
         r"""Construct an initial state near a binary limit.
 
         Parameters

@@ -5,6 +5,8 @@ coordinates ``(phi1, phi2)``.  They also carry the direction and phase-pair
 information needed to initialize spinodal and binodal calculations.
 """
 
+from typing import Any, Iterator
+
 import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
@@ -38,12 +40,12 @@ class Point:
     composition domain.
     """
 
-    def __init__(self, idx: int, phi1: float, phi2: float):
+    def __init__(self, idx: int, phi1: float, phi2: float) -> None:
         self.idx = int(idx)
         self.phi1 = float(phi1)
         self.phi2 = float(phi2)
 
-    def dist(self, pt) -> float:
+    def dist(self, pt: "Point") -> float:
         """Calculate the Euclidean distance to another point.
 
         Parameters
@@ -67,11 +69,11 @@ class Point:
             )
         return np.sqrt((self.phi1 - pt.phi1) ** 2 + (self.phi2 - pt.phi2) ** 2)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         """Return a representation containing the composition coordinates."""
         return f"Point(phi1={self.phi1:.3f}, phi2={self.phi2:.3f})"
 
-    def __add__(self, pt):
+    def __add__(self, pt: "Point") -> np.ndarray:
         """Add the coordinates of two points.
 
         Parameters
@@ -95,7 +97,7 @@ class Point:
             )
         return np.array([self.phi1 + pt.phi1, self.phi2 + pt.phi2])
 
-    def __sub__(self, pt):
+    def __sub__(self, pt: "Point") -> np.ndarray:
         """Subtract another point's coordinates from this point.
 
         Parameters
@@ -119,7 +121,7 @@ class Point:
             )
         return np.array([self.phi1 - pt.phi1, self.phi2 - pt.phi2])
 
-    def plot(self, s=10, **kwargs):
+    def plot(self, s: float = 10, **kwargs: Any) -> None:
         """Plot the point on the current Matplotlib axes.
 
         Parameters
@@ -136,7 +138,9 @@ class Point:
         """
         plt.scatter(self.phi1, self.phi2, s=s, **kwargs)
 
-    def is_between(self, pt1, pt2, tol=np.pi / 8):
+    def is_between(
+        self, pt1: "Point", pt2: "Point", tol: float = np.pi / 8
+    ) -> bool:
         """Check whether this point lies approximately between two points.
 
         The check compares the angle between the vectors from this point to
@@ -176,7 +180,7 @@ class Point:
         cos_angle = np.dot(self_to_1, self_to_2)
         return cos_angle < np.cos(np.pi - tol)
 
-    def is_close_to(self, pt, tol=1e-3):
+    def is_close_to(self, pt: "Point", tol: float = 1e-3) -> bool:
         """Check whether another point is within a distance tolerance.
 
         Parameters
@@ -202,7 +206,7 @@ class Point:
             )
         return self.dist(pt) < tol
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[float]:
         """Iterate over the two composition coordinates.
 
         Yields
@@ -227,7 +231,7 @@ class SpinodalPoint(Point):
         Second independent composition coordinate.
     """
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         """Return a representation identifying the point as spinodal."""
         return f"SpinodalPoint(phi1={self.phi1:.3f}, phi2={self.phi2:.3f})"
 
@@ -267,14 +271,18 @@ class CriticalPoint(Point):
     must therefore have nonzero length.
     """
 
-    def __init__(self, idx: int, phi1: float, phi2: float, dphi1: float, dphi2: float):
+    def __init__(
+        self, idx: int, phi1: float, phi2: float, dphi1: float, dphi2: float
+    ) -> None:
         super().__init__(idx, phi1, phi2)
         dphi_norm = np.sqrt(dphi1**2 + dphi2**2)
         self.dphi1 = float(dphi1) / dphi_norm
         self.dphi2 = float(dphi2) / dphi_norm
 
     @classmethod
-    def from_points(cls, idx: int, pt1: SpinodalPoint, pt2: SpinodalPoint):
+    def from_points(
+        cls, idx: int, pt1: SpinodalPoint, pt2: SpinodalPoint
+    ) -> "CriticalPoint":
         """Construct a critical point from two spinodal points.
 
         Parameters
@@ -308,7 +316,7 @@ class CriticalPoint(Point):
 
         return cls(idx, phi1, phi2, dphi1, dphi2)
 
-    def get_phi_and_v_init(self):
+    def get_phi_and_v_init(self) -> tuple[np.ndarray, np.ndarray]:
         """Create initial phase coordinates and a tracing direction.
 
         The two phases are placed on opposite sides of the critical point at
@@ -335,7 +343,7 @@ class CriticalPoint(Point):
         v_init = np.array([self.dphi1, self.dphi2, -self.dphi1, -self.dphi2])
         return phi_init, v_init
 
-    def plot(self, s=10, **kwargs):
+    def plot(self, s: float = 10, **kwargs: Any) -> None:
         """Plot the critical point on the current Matplotlib axes.
 
         Parameters
@@ -358,7 +366,7 @@ class CriticalPoint(Point):
             kwargs["edgecolor"] = "black"
         super().plot(s=s, **kwargs)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         """Return a representation containing coordinates and direction."""
         return f"CriticalPoint(phi1={self.phi1:.3f}, phi2={self.phi2:.3f}, dphi1={self.dphi1:.3f}, dphi2={self.dphi2:.3f})"
 
@@ -385,12 +393,14 @@ class BinodalPoint:
         Composition of phase B, assigned point index 1.
     """
 
-    def __init__(self, phi1a: float, phi2a: float, phi1b: float, phi2b: float):
+    def __init__(
+        self, phi1a: float, phi2a: float, phi1b: float, phi2b: float
+    ) -> None:
         self.pta = Point(0, phi1a, phi2a)
         self.ptb = Point(1, phi1b, phi2b)
 
     @classmethod
-    def from_points(cls, pt1: Point, pt2: Point):
+    def from_points(cls, pt1: Point, pt2: Point) -> "BinodalPoint":
         """Construct a binodal point from two phase-composition points.
 
         Parameters
@@ -408,11 +418,11 @@ class BinodalPoint:
         """
         return cls(pt1.phi1, pt1.phi2, pt2.phi1, pt2.phi2, sv)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         """Return a representation containing both phase compositions."""
         return f"BinodalPoint(phi_a=({self.pta.phi1:.4f}, {self.pta.phi2:.4f}), phi_b=({self.ptb.phi1:.4f}, {self.ptb.phi2:.4f}))"
 
-    def to_numpy(self):
+    def to_numpy(self) -> np.ndarray:
         """Return both phase compositions as a flat array.
 
         Returns
@@ -423,7 +433,7 @@ class BinodalPoint:
         """
         return np.array([self.pta.phi1, self.pta.phi2, self.ptb.phi1, self.ptb.phi2])
 
-    def plot(self, s=20, **kwargs):
+    def plot(self, s: float = 20, **kwargs: Any) -> None:
         """Plot both coexisting phase compositions.
 
         Parameters
@@ -473,12 +483,17 @@ class BinodalInitialPoint(BinodalPoint):
     ``v_init`` must have nonzero length so that it can be normalized.
     """
 
-    def __init__(self, phi_init: np.ndarray, v_init: np.ndarray):
+    def __init__(self, phi_init: np.ndarray, v_init: np.ndarray) -> None:
         super().__init__(*phi_init)
         self.phi_init = phi_init
         self.v_init = v_init / np.linalg.norm(v_init)
 
-    def is_similar_to(self, bipt, dist_tol=1e-3, angle_tol=np.pi / 8):
+    def is_similar_to(
+        self,
+        bipt: "BinodalInitialPoint",
+        dist_tol: float = 1e-3,
+        angle_tol: float = np.pi / 16,
+    ) -> bool:
         """Check whether another binodal initial point is equivalent.
 
         Phase labels may be exchanged, and tracing directions may have
@@ -521,7 +536,7 @@ class BinodalInitialPoint(BinodalPoint):
 
         return False
 
-    def plot(self, **kwargs):
+    def plot(self, **kwargs: Any) -> None:
         """Plot both phases and their initial tracing directions.
 
         Parameters
@@ -557,11 +572,11 @@ class BinodalInitialPoint(BinodalPoint):
             ec="red",
         )
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         """Return a representation of the phases and tracing direction."""
         return f"BinodalInitialPoint(phi_a=({self.pta.phi1:.4f}, {self.pta.phi2:.4f}), phi_b=({self.ptb.phi1:.4f}, {self.ptb.phi2:.4f}), v_init={self.v_init})"
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[np.ndarray]:
         """Iterate over the initial coordinates and normalized direction.
 
         Yields

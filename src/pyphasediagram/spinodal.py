@@ -8,14 +8,17 @@ locally unstable region.
 """
 
 import warnings
-from typing import Optional
+from typing import Any, Optional, Union
 
 import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
 import shapely
+from numpy.typing import ArrayLike
 
 from pyphasediagram.point import CriticalPoint, SpinodalPoint
+
+FloatOrArray = Union[float, np.ndarray]
 
 # TODO: Throw error if polygons don't match number of connected components. This happens for chi=2.667
 
@@ -62,7 +65,7 @@ class Spinodal:
 
     DOMAIN_CORNERS = [(0, 0), (0, 1), (1, 0)]
 
-    def __init__(self, chis: np.ndarray):
+    def __init__(self, chis: np.ndarray) -> None:
         if chis.shape != (2, 2):
             raise ValueError(
                 f"Expected chis to be a 2x2 matrix, but got shape {chis.shape}"
@@ -73,7 +76,7 @@ class Spinodal:
         self.critical_points = []
         self.polygons: list[shapely.geometry.Polygon] = None
 
-    def build(self, num_points=10000):
+    def build(self, num_points: int = 10000) -> None:
         """Build the spinodal graph and derived geometric objects.
 
         Parameters
@@ -116,7 +119,9 @@ class Spinodal:
         self._find_critical_points()
         self._build_polygons()
 
-    def _get_quadratic_coefficients(self, phi, is_calculate_phi2=True):
+    def _get_quadratic_coefficients(
+        self, phi: ArrayLike, is_calculate_phi2: bool = True
+    ) -> tuple[FloatOrArray, FloatOrArray, FloatOrArray]:
         """Return the unnormalized spinodal-polynomial coefficients.
 
         Parameters
@@ -147,7 +152,9 @@ class Spinodal:
         return quadratic, linear, constant
 
     @staticmethod
-    def _polynomial_degree_masks(quadratic, linear, constant):
+    def _polynomial_degree_masks(
+        quadratic: ArrayLike, linear: ArrayLike, constant: ArrayLike
+    ) -> tuple[Union[bool, np.ndarray], Union[bool, np.ndarray]]:
         """Classify polynomial samples as quadratic or linear.
 
         Coefficients smaller than floating-point resolution relative to the
@@ -199,7 +206,9 @@ class Spinodal:
             phi2s.append(phi2[mask])
         return phi1s, phi2s
 
-    def _phi2_from_phi1(self, phi1):
+    def _phi2_from_phi1(
+        self, phi1: ArrayLike
+    ) -> tuple[FloatOrArray, FloatOrArray]:
         """Calculate both analytic spinodal branches at specified ``phi1``.
 
         Parameters
@@ -270,7 +279,9 @@ class Spinodal:
 
         return upper, lower
 
-    def eigenvalues_from_phi(self, phi1, phi2):
+    def eigenvalues_from_phi(
+        self, phi1: ArrayLike, phi2: ArrayLike
+    ) -> tuple[FloatOrArray, FloatOrArray]:
         """Calculate the free-energy Hessian eigenvalues at compositions.
 
         Parameters
@@ -307,7 +318,9 @@ class Spinodal:
 
         return eigenvalue1, eigenvalue2
 
-    def _domain_data(self, phi1_i, phi1_f, num_points=5000):
+    def _domain_data(
+        self, phi1_i: float, phi1_f: float, num_points: int = 5000
+    ) -> None:
         """Sample two spinodal branches over a ``phi1`` interval.
 
         Parameters
@@ -345,7 +358,7 @@ class Spinodal:
                 pt_prev = pt
                 self.node_id += 1
 
-    def _spinodal_domains(self):
+    def _spinodal_domains(self) -> np.ndarray:
         """Find intervals with real analytic spinodal solutions.
 
         Returns
@@ -407,7 +420,9 @@ class Spinodal:
         return np.asarray(domain_endpoints, dtype=float)
 
     @classmethod
-    def _in_domain(cls, phi1, phi2):
+    def _in_domain(
+        cls, phi1: ArrayLike, phi2: ArrayLike
+    ) -> Union[bool, np.ndarray]:
         """Check whether compositions lie in the open ternary domain.
 
         Parameters
@@ -428,7 +443,7 @@ class Spinodal:
         phi2 = np.asarray(phi2)
         return (phi1 > 0) & (phi2 > 0) & (phi1 + phi2 < 1)
 
-    def _clip_to_domain(self):
+    def _clip_to_domain(self) -> None:
         """Remove graph nodes outside the physical composition domain.
 
         Returns
@@ -456,7 +471,7 @@ class Spinodal:
             if len(comp) == 1:
                 self.spinodal_graph.remove_node(next(iter(comp)))
 
-    def _connect_branches(self):
+    def _connect_branches(self) -> None:
         """Join nearby graph endpoints that form a smooth continuation.
 
         Returns
@@ -504,7 +519,7 @@ class Spinodal:
                         self.spinodal_graph.add_edge(epti, eptj)
                         invalid_endpoints.extend([epti, eptj])
 
-    def _coords_from_subgraph(self, sg):
+    def _coords_from_subgraph(self, sg: nx.Graph) -> tuple[np.ndarray, np.ndarray]:
         """Extract graph coordinates in traversal order.
 
         Parameters
@@ -541,7 +556,7 @@ class Spinodal:
         phi2s = np.array([n.phi2 for n in ordered_points])
         return phi1s, phi2s
 
-    def _third_derivative(self, phi1, phi2):
+    def _third_derivative(self, phi1: ArrayLike, phi2: ArrayLike) -> FloatOrArray:
         """Evaluate the third-derivative criticality condition.
 
         Parameters
@@ -567,7 +582,7 @@ class Spinodal:
         H_12 = 1 / phi0 + self.chis[0, 1]
         return H_12**3 / (phi1**2) - H_11**3 / (phi2**2) + (H_11 - H_12) ** 3 / phi0**2
 
-    def _find_critical_points(self):
+    def _find_critical_points(self) -> None:
         """Locate and store critical points on every spinodal branch.
 
         Returns
@@ -644,7 +659,7 @@ class Spinodal:
                     CriticalPoint(-1, phi1_c, phi2_c, dphi1, dphi2)
                 )
 
-    def _build_polygons(self):
+    def _build_polygons(self) -> None:
         """Construct locally stable polygons from spinodal graph components.
 
         Returns
@@ -783,7 +798,7 @@ class Spinodal:
             polygon = shapely.make_valid(polygon.difference(poly))
         return polygon
 
-    def plot(self, **kwargs):
+    def plot(self, **kwargs: Any) -> None:
         """Plot spinodal branches and critical points on the current axes.
 
         Parameters

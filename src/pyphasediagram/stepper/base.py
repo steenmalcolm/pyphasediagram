@@ -9,6 +9,7 @@ Importing the module enables 64-bit floating-point calculations in JAX.
 """
 
 from abc import ABC, abstractmethod
+from typing import Any, Union
 
 import jax
 import jax.numpy as jnp
@@ -65,7 +66,7 @@ class BaseStepper(ABC):
     CYCLE_MIN_STEPS = 10  # don't trigger immediately
     CYCLE_INIT_TOL = 1e-3  # "back at start" tolerance
 
-    def __init__(self):
+    def __init__(self) -> None:
         # JIT all computational kernels
         self._residual_jit = jax.jit(self.residual)
         self._jac_fn = jax.jit(jax.jacobian(self.residual))
@@ -120,7 +121,9 @@ class BaseStepper(ABC):
         # IMPORTANT: to be fully jittable, subclasses must implement this using JAX ops
         # and return a scalar boolean-like jnp.ndarray (dtype=bool).
 
-    def _svd(self, J, full_matrices=False):
+    def _svd(
+        self, J: jnp.ndarray, full_matrices: bool = False
+    ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
         """Compute a singular-value decomposition with JAX.
 
         Parameters
@@ -211,7 +214,7 @@ class BaseStepper(ABC):
 
     def _hit_initial_cycle(
         self, step: jnp.ndarray, phi: jnp.ndarray, phi_hist: jnp.ndarray
-    ):
+    ) -> jnp.ndarray:
         """Check whether a trace has returned to its initial state.
 
         Parameters
@@ -236,7 +239,7 @@ class BaseStepper(ABC):
             step >= self.CYCLE_MIN_STEPS, dist0 < self.CYCLE_INIT_TOL
         )
 
-    def _decode_status(self, status):
+    def _decode_status(self, status: Union[int, jnp.ndarray]) -> list[str]:
         """Convert a status bit mask to human-readable flag names.
 
         Parameters
@@ -333,8 +336,16 @@ class BaseStepper(ABC):
         delta_0: float,
         delta_1: float,
         max_steps: int,
-        phi_dtype,
-    ):
+        phi_dtype: Any,
+    ) -> tuple[
+        jnp.ndarray,
+        jnp.ndarray,
+        jnp.ndarray,
+        jnp.ndarray,
+        jnp.ndarray,
+        jnp.ndarray,
+        jnp.ndarray,
+    ]:
         """Perform one iteration of the outer tracing loop.
 
         Parameters
@@ -463,7 +474,7 @@ class BaseStepper(ABC):
 
         return step2, active2, phi2, sv2, phi_hist2, sv_hist2, status2
 
-    def _loop_cond(self, carry):
+    def _loop_cond(self, carry: tuple) -> jnp.ndarray:
         """Return the active flag from a tracing-loop state.
 
         Parameters
@@ -479,7 +490,15 @@ class BaseStepper(ABC):
         step, active, phi_new, sv, phi_hist, sv_hist, status = carry
         return active
 
-    def _loop_body(self, carry, v_init, delta_0, delta_1, max_steps, phi_dtype):
+    def _loop_body(
+        self,
+        carry: tuple,
+        v_init: jnp.ndarray,
+        delta_0: float,
+        delta_1: float,
+        max_steps: int,
+        phi_dtype: Any,
+    ) -> tuple:
         """Advance the tracing-loop state by one iteration.
 
         Parameters
@@ -525,7 +544,7 @@ class BaseStepper(ABC):
         delta_0: float,
         delta_1: float,
         max_steps: int,
-    ):
+    ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
         """Execute the JIT-compatible core tracing loop.
 
         Parameters
@@ -595,11 +614,11 @@ class BaseStepper(ABC):
 
     def run(
         self,
-        phi_init,
-        v_init,
-        delta_0=2e-4,
-        delta_1=1e-3,
-    ):
+        phi_init: Union[np.ndarray, jnp.ndarray],
+        v_init: Union[np.ndarray, jnp.ndarray],
+        delta_0: float = 2e-4,
+        delta_1: float = 1e-3,
+    ) -> tuple[np.ndarray, np.ndarray, list[str]]:
         """Trace a coexistence curve from an initial state and direction.
 
         Parameters

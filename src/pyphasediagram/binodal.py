@@ -7,6 +7,8 @@ provides helpers for plotting the resulting geometry and selecting a discrete
 phase decomposition for a prescribed mean composition.
 """
 
+from typing import Any, Optional
+
 import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
@@ -56,7 +58,7 @@ class BinodalSection:
     mutations of ``phis``.
     """
 
-    def __init__(self, phis: np.ndarray, svs: np.ndarray):
+    def __init__(self, phis: np.ndarray, svs: np.ndarray) -> None:
         if phis.shape[2] != len(svs):
             raise ValueError("phis and svs must have the same number of trace points")
         self.phis = phis
@@ -66,7 +68,13 @@ class BinodalSection:
         self._lines = (self.line_a, self.line_b)
         self._coords = tuple(np.asarray(line.coords) for line in self._lines)
 
-    def plot(self, colora="red", colorb="blue", is_tie_lines=False, **kwargs) -> None:
+    def plot(
+        self,
+        colora: Any = "red",
+        colorb: Any = "blue",
+        is_tie_lines: bool = False,
+        **kwargs: Any,
+    ) -> None:
         """Plot both coexistence branches on the current axes.
 
         Parameters
@@ -104,7 +112,9 @@ class BinodalSection:
             )
 
     @staticmethod
-    def _interpolate_on_segment(coords: np.ndarray, point) -> tuple[int, float]:
+    def _interpolate_on_segment(
+        coords: np.ndarray, point: shapely.Point
+    ) -> tuple[int, float]:
         r"""Locate a point on the nearest segment of a polyline.
 
         Parameters
@@ -143,7 +153,9 @@ class BinodalSection:
         best = int(np.argmin(distances_sq))
         return best, float(t[best])
 
-    def _intersection_params(self, self_idx: int, other, other_idx: int):
+    def _intersection_params(
+        self, self_idx: int, other: "BinodalSection", other_idx: int
+    ) -> list[tuple[int, float, int, float]]:
         """Find interpolation coordinates at intersections of two branches.
 
         Parameters
@@ -196,7 +208,9 @@ class BinodalSection:
             for point in points
         ]
 
-    def intersects_with(self, other) -> list[tuple[np.ndarray, np.ndarray, np.ndarray]]:
+    def intersects_with(
+        self, other: "BinodalSection"
+    ) -> list[tuple[np.ndarray, np.ndarray, np.ndarray]]:
         """Construct three-phase candidates from branch intersections.
 
         Parameters
@@ -248,7 +262,7 @@ class BinodalSection:
 
         return tp_points
 
-    def contained_in(self, other, n_samples=1000):
+    def contained_in(self, other: "BinodalSection", n_samples: int = 1000) -> bool:
         r"""Check whether this section approximately duplicates another.
 
         Parameters
@@ -330,7 +344,7 @@ class BinodalSection:
                 degenerate_points.append(BinodalInitialPoint(phi_init, v_init))
         return degenerate_points
 
-    def __len__(self):
+    def __len__(self) -> int:
         """Return the number of sampled coexistence states in the section."""
         return self.phis.shape[2]
 
@@ -373,7 +387,9 @@ class Binodal:
 
     SV_BRANCH_THRESHOLD = 1e-2
 
-    def __init__(self, chis: np.ndarray, critical_points: list[CriticalPoint] = []):
+    def __init__(
+        self, chis: np.ndarray, critical_points: list[CriticalPoint] = []
+    ) -> None:
         self.chis = chis
         self.critical_points = critical_points
         self.binodal_sections: list[BinodalSection] = []
@@ -383,7 +399,7 @@ class Binodal:
         self._bipt_task_list: list[BinodalInitialPoint] = []
         self._bipt_hist: list[BinodalInitialPoint] = []
 
-    def _build_section(self, phi_init, v_init):
+    def _build_section(self, phi_init: np.ndarray, v_init: np.ndarray) -> bool:
         """Trace and store one coexistence-curve section.
 
         Parameters
@@ -477,7 +493,7 @@ class Binodal:
         self._remove_duplicate_sections()
         self._find_phase_polygons()
 
-    def _remove_duplicate_sections(self):
+    def _remove_duplicate_sections(self) -> None:
         """Remove sections approximately contained in another section.
 
         Returns
@@ -542,7 +558,7 @@ class Binodal:
 
         return branching_points
 
-    def _find_phase_polygons(self):
+    def _find_phase_polygons(self) -> None:
         """Construct the three-phase and two-phase polygon collections.
 
         Returns
@@ -552,7 +568,7 @@ class Binodal:
         self._find_three_phase_polygons()
         self._find_two_phase_polygons()
 
-    def _find_three_phase_polygons(self, overlap_threshold: float = 0.98):
+    def _find_three_phase_polygons(self, overlap_threshold: float = 0.98) -> None:
         r"""Construct candidate three-phase polygons from section crossings.
 
         Parameters
@@ -603,7 +619,7 @@ class Binodal:
                     if not is_duplicate:
                         self.three_phase_polygons.append(poly)
 
-    def _find_two_phase_polygons(self):
+    def _find_two_phase_polygons(self) -> None:
         r"""Construct polygonal regions associated with two-phase coexistence.
 
         Returns
@@ -652,7 +668,9 @@ class Binodal:
                     self.two_phase_polygons.remove(tp_poly)
                 self.two_phase_polygons.append(poly)
 
-    def _remove_unstable_sections(self, unstable_manifold: shapely.Polygon = None):
+    def _remove_unstable_sections(
+        self, unstable_manifold: Optional[shapely.Polygon] = None
+    ) -> None:
         """Remove trace samples that enter a locally unstable region.
 
         Parameters
@@ -870,7 +888,7 @@ class Binodal:
         else:
             return None, None
 
-    def plot_sections(self, **kwargs):
+    def plot_sections(self, **kwargs: Any) -> None:
         """Plot every stored binodal section on the current axes.
 
         Parameters
@@ -889,7 +907,7 @@ class Binodal:
             else:
                 section.plot(**kwargs)
 
-    def plot_polygons(self, **kwargs):
+    def plot_polygons(self, **kwargs: Any) -> None:
         """Plot the two- and three-phase regions on the current axes.
 
         Parameters

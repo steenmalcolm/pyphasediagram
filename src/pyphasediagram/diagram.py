@@ -1,6 +1,10 @@
+from typing import Optional
+
 import matplotlib.pyplot as plt
 import numpy as np
 import shapely
+from matplotlib.axes import Axes
+from matplotlib.figure import Figure
 
 from pyphasediagram.binodal import Binodal
 from pyphasediagram.spinodal import Spinodal
@@ -27,7 +31,7 @@ class PhaseDiagram:
 
     """
 
-    def __init__(self, chis: np.ndarray):
+    def __init__(self, chis: np.ndarray) -> None:
         chis = np.asarray(chis, dtype=float)
         if len(chis) == 3:
             chis = np.array(
@@ -66,7 +70,7 @@ class PhaseDiagram:
         """Given a mean composition, return the compositions of coexisting phases."""
         pass
 
-    def plot_phase_counts(self, ax=None):
+    def plot_phase_counts(self, ax: Optional[Axes] = None) -> tuple[Figure, Axes]:
         """Visualize the number of coexisting phases across the composition space."""
         from matplotlib.collections import PatchCollection
         from matplotlib.patches import Patch
@@ -151,7 +155,7 @@ class PhaseDiagram:
         )
         return fig, ax
 
-    def plot(self, ax=None):
+    def plot(self, ax: Optional[Axes] = None) -> tuple[Figure, Axes]:
         """Quick visualization of spinodal, binodal sections, and three-phase points."""
         if ax is None:
             fig, ax = plt.subplots()
@@ -203,7 +207,7 @@ class PhaseDiagram:
         ax.legend()
         return fig, ax
 
-    def plot_summary(self):
+    def plot_summary(self) -> tuple[Figure, tuple[Axes, Axes]]:
         """Side-by-side subplots: binodal/spinodal (left) and phase regions (right)."""
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
         fig.suptitle(
