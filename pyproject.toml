@@ -3,32 +3,35 @@
 # ---------------------------------------
 
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=61.0", "setuptools_scm[toml]>=6.2", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "pyphasediagram"
-version = "0.1.0"
-description = "A Python package implementing fast calculations of the binodals of ternary systems."
+description = "A Python package implementing fast calculations of binodals of ternary systems."
 readme = "README.md"
 license = { file = "LICENSE" }
 authors = [
-  { name="Malcolm Steen", email="malcolm.steen@stud.uni-goettingen.de" }
+  { name = "Malcolm Steen", email = "malcolm.steen@stud.uni-goettingen.de" },
+  { name = "David Zwicker", email = "david.zwicker@ds.mpg.de" },
 ]
-keywords = ["example", "pyphasediagram"]
+keywords = ["Phase diagrams"]
 classifiers = [
-  "Programming Language :: Python :: 3"
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "Programming Language :: Python :: 3",
 ]
 requires-python = ">=3.9"
-dependencies = [
-  "mpltern >= 1.0.5, < 2",
-]
+dynamic = ["version"]
+dependencies = ["mpltern >= 1.0.5, < 2"]
 
 [project.optional-dependencies]
-dev = [
-  "pytest >= 6.0.0",
-]
-docs = [
-  "sphinx",
-  "sphinx-rtd-theme",
-]
+dev = ["pytest >= 6.0.0"]
+docs = ["sphinx", "sphinx-rtd-theme"]
+
+
+[project.urls]
+repository = "https://github.com/steenmalcolm/pyphasediagram"
+
+[tool.setuptools_scm]
+write_to = "src/pyphasediagram/_version.py"
