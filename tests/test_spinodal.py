@@ -132,8 +132,39 @@ def test_phi2_from_phi1_solves_linear_equation_when_quadratic_term_is_zero():
     assert quadratic == pytest.approx(0.0)
     assert linear != pytest.approx(0.0)
     assert upper == pytest.approx(-constant / linear)
-    assert lower == pytest.approx(-constant / linear)
     assert upper == pytest.approx(0.25)
+    assert np.isnan(lower)
+
+
+def test_phi2_from_phi1_returns_repeated_quadratic_root_once():
+    spinodal = Spinodal(np.array([[0.0, -3.0], [-3.0, -6.0]]))
+
+    upper, lower = spinodal._phi2_from_phi1(1.0 / 3.0)
+
+    assert upper == pytest.approx(1.0 / 3.0)
+    assert np.isnan(lower)
+
+
+def test_domain_data_skips_nan_samples_without_connecting_across_them(
+    monkeypatch, simple_chis
+):
+    spinodal = Spinodal(simple_chis)
+    monkeypatch.setattr(
+        spinodal,
+        "_phi2_from_phi1",
+        lambda phi1: (
+            np.array([0.2, np.nan, 0.3]),
+            np.array([np.nan, 0.4, np.nan]),
+        ),
+    )
+
+    spinodal._domain_data(0.1, 0.3, num_points=3)
+
+    nodes = list(spinodal.spinodal_graph)
+    coordinates = [(point.phi1, point.phi2) for point in nodes]
+    assert coordinates == pytest.approx([(0.1, 0.2), (0.3, 0.3), (0.2, 0.4)])
+    assert spinodal.spinodal_graph.number_of_edges() == 0
+    assert spinodal.node_id == 3
 
 
 def test_domain_data_adds_nodes_and_edges(simple_chis):

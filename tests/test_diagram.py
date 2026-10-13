@@ -1,3 +1,4 @@
+import warnings
 from types import SimpleNamespace
 
 import matplotlib.pyplot as plt
@@ -79,6 +80,31 @@ def test_phase_diagram_reduces_full_interaction_matrix():
 def test_phase_diagram_rejects_non_3x3_interaction_matrix(chis):
     with pytest.raises(ValueError, match="requires a 3x3 interaction matrix"):
         PhaseDiagram(chis)
+
+
+def test_build_does_not_duplicate_identical_nodes():
+    """Coincident analytic branches must produce one graph node."""
+    chis = np.array(
+        [
+            [0.0, 0.0, 3.0],
+            [0.0, 0.0, 0.0],
+            [3.0, 0.0, 0.0],
+        ]
+    )
+    diagram = PhaseDiagram(chis)
+
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "error",
+            message="invalid value encountered in divide",
+            category=RuntimeWarning,
+        )
+        diagram.build()
+
+    coordinates = [
+        (point.phi1, point.phi2) for point in diagram.spinodal.spinodal_graph
+    ]
+    assert len(coordinates) == len(set(coordinates))
 
 
 def test_to_ternary_coordinates_adds_implicit_component():

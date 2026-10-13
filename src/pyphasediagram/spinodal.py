@@ -206,9 +206,7 @@ class Spinodal:
             phi2s.append(phi2[mask])
         return phi1s, phi2s
 
-    def _phi2_from_phi1(
-        self, phi1: ArrayLike
-    ) -> tuple[FloatOrArray, FloatOrArray]:
+    def _phi2_from_phi1(self, phi1: ArrayLike) -> tuple[FloatOrArray, FloatOrArray]:
         """Calculate both analytic spinodal branches at specified ``phi1``.
 
         Parameters
@@ -228,8 +226,11 @@ class Spinodal:
         Output shapes follow ``phi1``. Inputs for which the quadratic
         discriminant is negative produce ``NaN`` values. If the quadratic
         coefficient vanishes but the linear coefficient does not, the sole
-        linear solution is returned in both branch arrays. Fully degenerate
-        equations, which do not define a unique solution, produce ``NaN``.
+        linear solution is returned in the upper branch and the lower branch
+        is ``NaN``. Duplicate quadratic roots are handled in the same
+        way because it represents only one distinct composition. Fully
+        degenerate equations, which do not define a unique solution, produce
+        ``NaN`` in both branches.
         """
         quadratic, linear, constant = self._get_quadratic_coefficients(phi1)
         is_quadratic, is_linear = self._polynomial_degree_masks(
@@ -264,8 +265,11 @@ class Spinodal:
             upper[has_real_quadratic_roots] = (
                 -p[has_real_quadratic_roots] / 2 + square_root[has_real_quadratic_roots]
             )
-            lower[has_real_quadratic_roots] = (
-                -p[has_real_quadratic_roots] / 2 - square_root[has_real_quadratic_roots]
+            # A zero square root gives one distinct composition, not two.
+            has_distinct_quadratic_roots = has_real_quadratic_roots & (square_root > 0)
+            lower[has_distinct_quadratic_roots] = (
+                -p[has_distinct_quadratic_roots] / 2
+                - square_root[has_distinct_quadratic_roots]
             )
 
             linear_root = np.divide(
@@ -275,7 +279,6 @@ class Spinodal:
                 where=is_linear,
             )
             upper[is_linear] = linear_root[is_linear]
-            lower[is_linear] = linear_root[is_linear]
 
         return upper, lower
 
@@ -338,20 +341,27 @@ class Spinodal:
 
         Notes
         -----
-        Two path components are appended to :attr:`spinodal_graph`, including
-        points that may subsequently be removed by :meth:`_clip_to_domain`.
-        Node identifiers are assigned sequentially through :attr:`node_id`.
+        Finite samples from both analytic branches are appended to
+        :attr:`spinodal_graph`, including points that may subsequently be
+        removed by :meth:`_clip_to_domain`. Non-finite samples are skipped and
+        break the corresponding path so that an edge is not drawn across a
+        gap. Node identifiers are assigned sequentially through
+        :attr:`node_id`.
         """
         phi1_vals = np.linspace(phi1_i, phi1_f, num_points)
         phi2_branches = self._phi2_from_phi1(phi1_vals)
 
         # Iterate over both branches
         for phi2_vals in phi2_branches:
-            pt_prev: SpinodalPoint = None
-            for i, (phi1, phi2) in enumerate(zip(phi1_vals, phi2_vals)):
+            pt_prev: Optional[SpinodalPoint] = None
+            for phi1, phi2 in zip(phi1_vals, phi2_vals):
+                if not (np.isfinite(phi1) and np.isfinite(phi2)):
+                    pt_prev = None
+                    continue
+
                 pt = SpinodalPoint(self.node_id, phi1, phi2)
                 self.spinodal_graph.add_node(pt)
-                if i:
+                if pt_prev is not None:
                     self.spinodal_graph.add_edge(pt_prev, pt)
 
                 # Copy constructor
@@ -420,9 +430,7 @@ class Spinodal:
         return np.asarray(domain_endpoints, dtype=float)
 
     @classmethod
-    def _in_domain(
-        cls, phi1: ArrayLike, phi2: ArrayLike
-    ) -> Union[bool, np.ndarray]:
+    def _in_domain(cls, phi1: ArrayLike, phi2: ArrayLike) -> Union[bool, np.ndarray]:
         """Check whether compositions lie in the open ternary domain.
 
         Parameters
