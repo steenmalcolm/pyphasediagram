@@ -738,6 +738,9 @@ def _assert_point_in_simplex(phi1, phi2, tol=1e-12):
 # ----------------------------
 
 
+@pytest.mark.filterwarnings(
+    r"ignore:Third derivative at critical point .* is quite large:RuntimeWarning"
+)
 @pytest.mark.parametrize("seed", list(range(100)))
 def test_e2e_spinodal_invariants_random_chis(seed):
     """This is a broad end-to-end test that builds many spinodal graphs from random chi parameters and checks key invariants"""
@@ -849,6 +852,9 @@ def test_e2e_spinodal_invariants_random_chis(seed):
                     n_samples += 1
 
 
+@pytest.mark.filterwarnings(
+    r"ignore:Third derivative at critical point .* is quite large:RuntimeWarning"
+)
 @pytest.mark.parametrize("chi", np.linspace(2.1, 3.5, 29))
 def test_e2e_spinodal_invariants_symmetric_case(chi):
     """
