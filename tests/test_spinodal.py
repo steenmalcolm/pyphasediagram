@@ -326,18 +326,26 @@ def test_coords_from_subgraph_cycle_contains_all_nodes(simple_chis):
 # ----------------------------
 
 
-def test_third_derivative_scalar_matches_manual(simple_chis):
-    sp = Spinodal(simple_chis)
-    # choose values away from 0 / boundaries to avoid singularities
+def test_third_derivative_scalar_matches_eigenvector():
+    # At this composition, the Hessian is diag(0, 16 / 3), so its normalized
+    # eigenvector of the vanishing eigenvalue is (1, 0).
+    sp = Spinodal(np.array([[-7.0, -2.0], [-2.0, 0.0]]))
     phi1, phi2 = 0.2, 0.3
-
     phi0 = 1 - phi1 - phi2
-    H_11 = 1 / phi1 + 1 / phi0 + simple_chis[0, 0]
-    H_12 = 1 / phi0 + simple_chis[0, 1]
-    expected = H_12**3 / (phi1**2) - H_11**3 / (phi2**2) + (H_11 - H_12) ** 3 / phi0**2
+    expected = -(1 / phi1**2) + 1 / phi0**2
 
     got = sp._third_derivative(phi1, phi2)
     assert got == pytest.approx(expected)
+
+
+def test_third_derivative_keeps_soft_eigenvector_orientation():
+    sp = Spinodal(np.array([[-5.0, -1.6], [-1.6, -0.2]]))
+    phi1 = np.array([0.29409234486384267, 0.29416660403227696])
+    phi2 = np.array([0.08079337161470079, 0.08105436146499123])
+
+    third_derivative = sp._third_derivative(phi1, phi2)
+
+    assert third_derivative == pytest.approx([-9.00276215, -8.99465797])
 
 
 def test_third_derivative_vectorized_shapes(simple_chis):

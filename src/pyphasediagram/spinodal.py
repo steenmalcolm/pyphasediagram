@@ -583,12 +583,47 @@ class Spinodal:
         Notes
         -----
         Inputs must lie in the admissible composition domain to avoid singular
-        denominators.
+        denominators. For array inputs, compositions must be ordered along the
+        spinodal branch so successive eigenvectors can be given a
+        consistent orientation.
         """
+        phi1, phi2 = np.asarray(phi1, dtype=float), np.asarray(phi2, dtype=float)
         phi0 = 1 - phi1 - phi2
         H_11 = 1 / phi1 + 1 / phi0 + self.chis[0, 0]
+        H_22 = 1 / phi2 + 1 / phi0 + self.chis[1, 1]
         H_12 = 1 / phi0 + self.chis[0, 1]
-        return H_12**3 / (phi1**2) - H_11**3 / (phi2**2) + (H_11 - H_12) ** 3 / phi0**2
+
+        H = np.stack(
+            (
+                np.stack((H_11, H_12), axis=-1),
+                np.stack((H_12, H_22), axis=-1),
+            ),
+            axis=-2,
+        )
+        eigvals, eigvecs = np.linalg.eigh(H)
+        vector_idxs = np.abs(eigvals[..., 0]) <= np.abs(eigvals[..., 1])
+        vecs = np.where(
+            vector_idxs[..., np.newaxis],
+            eigvecs[..., :, 0],
+            eigvecs[..., :, 1],
+        ).copy()
+
+        # Eigenvector signs are arbitrary. Always orient the first vector
+        # the same, then keep each subsequent vector aligned with its
+        # predecessor so sign changes in the derivative represent actual roots.
+        flat_vects = vecs.reshape(-1, 2)
+        if flat_vects[0, 0] < 0 or (flat_vects[0, 0] == 0 and flat_vects[0, 1] < 0):
+            flat_vects[0] *= -1
+
+        if len(flat_vects) > 1:
+            nb_dots = np.einsum("ij,ij->i", flat_vects[:-1], flat_vects[1:])
+            sign = np.concatenate(([1.0], np.cumprod(np.where(nb_dots < 0, -1.0, 1.0))))
+            flat_vects *= sign[:, np.newaxis]
+
+        v1 = vecs[..., 0]
+        v2 = vecs[..., 1]
+        # Third derivative
+        return -(v1**3) / phi1**2 - (v2**3) / phi2**2 + (v1 + v2) ** 3 / phi0**2
 
     def _find_critical_points(self) -> None:
         """Locate and store critical points on every spinodal branch.
