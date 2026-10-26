@@ -11,3 +11,5 @@ delete
 debug
 docs/build/
 docs/source/generated/
+docs/paper/paper.crossref
+docs/paper/paper.pdf
