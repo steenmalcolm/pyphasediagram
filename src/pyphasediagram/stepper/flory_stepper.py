@@ -1,19 +1,23 @@
 """Flory--Huggins coexistence-curve tracing for ternary mixtures.
 
-The module specializes :class:`~pyphasediagram.stepper.base.BaseStepper` with
-the chemical-potential and osmotic-pressure constraints of an incompressible
-ternary mixture.  It also provides initial states near each binary edge of the
-composition triangle.
+The module specializes :class:`~pyphasediagram.stepper.base.BaseStepper` with the
+chemical potential and osmotic pressure constraints of an incompressible ternary
+mixture. It also provides initial states near each binary edge of the composition
+triangle.
 """
 
-from typing import Optional
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 
 import jax.numpy as jnp
 import numpy as np
-from numpy.typing import ArrayLike
 from scipy.optimize import root
 
 from pyphasediagram.stepper.base import BaseStepper
+
+if TYPE_CHECKING:
+    from numpy.typing import ArrayLike
 
 
 class Stepper(BaseStepper):
@@ -33,9 +37,9 @@ class Stepper(BaseStepper):
     Notes
     -----
     A state is ordered as
-    :math:`\boldsymbol{\phi} = (\phi_1^{(a)}, \phi_2^{(a)},
-    \phi_1^{(b)}, \phi_2^{(b)})`, where :math:`a` and :math:`b` label the
-    two phases. The solvent composition in phase :math:`\alpha` is given by the incompressibility condition
+    :math:`\boldsymbol\phi = (\phi_1^{(a)}, \phi_2^{(a)}, \phi_1^{(b)}, \phi_2^{(b)})`,
+    where :math:`a` and :math:`b` label the two phases. The solvent composition in phase
+    :math:`\alpha` is given by the incompressibility condition.
 
     .. math::
 
@@ -82,9 +86,8 @@ class Stepper(BaseStepper):
            + \frac{1}{2}\sum_{i,j=1}^{2}
            \chi_{ij}\phi_i^{(\alpha)}\phi_j^{(\alpha)}.
 
-        Here,
-        :math:`\phi_0^{(\alpha)} = 1 - \phi_1^{(\alpha)} -
-        \phi_2^{(\alpha)}`. and :math:`\chi_{ij}` are the reduced interaction parameters.
+        Here, :math:`\phi_0^{(\alpha)} = 1 - \phi_1^{(\alpha)} - \phi_2^{(\alpha)}` and
+        :math:`\chi_{ij}` are the reduced interaction parameters.
 
         The logarithms require positive independent compositions and positive
         :math:`\phi_0^{(\alpha)}`. Invalid states are handled by
@@ -132,7 +135,7 @@ class Stepper(BaseStepper):
 
         return jnp.logical_or(close, invalid)
 
-    def binary_state(self, chi: float) -> Optional[float]:
+    def binary_state(self, chi: float) -> float | None:
         r"""Calculate the dilute fraction of a symmetric binary coexistence.
 
         The dense volume fraction follows from the incompressibility
@@ -166,20 +169,24 @@ class Stepper(BaseStepper):
         from an initial guess of ``1e-4``. It runs only during initialization
         and is not JIT-compiled.
         """
-        # This is initialization (SciPy); it does not need to be jitted to run the main stepper loop.
+        # This is initialization (SciPy); it does not need to be jitted to run the main
+        # stepper loop.
         if chi <= 2:
             print(f"Warning: Chi value {chi:.2f}<=2 too low for phase separation")
             return None
 
-        eq_func = lambda x: np.log(x / (1 - x)) + chi * (1 - 2 * x)
+        def eq_func(x):
+            return np.log(x / (1 - x)) + chi * (1 - 2 * x)
+
         sol = root(eq_func, 1e-4)
         if not sol.success:
-            raise ValueError(f"Root finding failed: {sol.message}")
+            msg = f"Root finding failed: {sol.message}"
+            raise ValueError(msg)
         return float(sol.x.item())
 
     def binary_init(
         self, which_comp: int = 0
-    ) -> tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+    ) -> tuple[np.ndarray | None, np.ndarray | None]:
         r"""Construct an initial state near a binary limit.
 
         Parameters
@@ -255,7 +262,8 @@ class Stepper(BaseStepper):
             phi_init[3] = 1 - phi_init[2] - phi_init[3]
             v_init = np.array([0, 1, 0, 1])
 
-        # No phase separation in this binary limit, return None to indicate failure to initialize
+        # No phase separation in this binary limit, return None to indicate failure to
+        # initialize
         if phi_bin is None:
             return None, None
 
@@ -277,15 +285,14 @@ class Stepper(BaseStepper):
             if iteration > max_iter:
                 # TODO: remove this stamement
                 return None, None
-                raise RuntimeError("In binary_init: Projection not converging")
+                msg = "In binary_init: Projection not converging"
+                raise RuntimeError(msg)
             iteration += 1
 
         return np.asarray(phi_init), np.asarray(v_init)
 
 
 if __name__ == "__main__":
-    import time
-
     import flory
     import matplotlib.pyplot as plt
 

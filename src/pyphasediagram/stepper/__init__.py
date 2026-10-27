@@ -1,1 +1,1 @@
-from pyphasediagram.stepper.flory_stepper import Stepper
+from pyphasediagram.stepper.flory_stepper import Stepper  # noqa: F401

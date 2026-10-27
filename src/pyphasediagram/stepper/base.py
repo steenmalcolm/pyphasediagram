@@ -8,14 +8,17 @@ condition.
 Importing the module enables 64-bit floating-point calculations in JAX.
 """
 
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
-from typing import Any, Union
+from typing import Any
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 
-# TODO: need a better way of checking if we are at the beginning of the run to avoid cycle termination too early.
+# TODO: need a better way of checking if we are at the beginning of the run to avoid
+# cycle termination too early.
 
 # Always use float64 with jax
 jax.config.update("jax_enable_x64", True)
@@ -168,8 +171,7 @@ class BaseStepper(ABC):
         """
         J = self._jac_fn(phi)
         _, _, Vt = self._svd_fn(J, full_matrices=True)
-        ns = Vt[-1]
-        return ns
+        return Vt[-1]
 
     def _projection(self, phi: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray, float]:
         """Calculate one regularized Newton projection update.
@@ -239,7 +241,7 @@ class BaseStepper(ABC):
             step >= self.CYCLE_MIN_STEPS, dist0 < self.CYCLE_INIT_TOL
         )
 
-    def _decode_status(self, status: Union[int, jnp.ndarray]) -> list[str]:
+    def _decode_status(self, status: int | jnp.ndarray) -> list[str]:
         """Convert a status bit mask to human-readable flag names.
 
         Parameters
@@ -301,14 +303,15 @@ class BaseStepper(ABC):
         res0 = jnp.linalg.norm(res_vec0)
 
         def proj_cond(state):
-            k, phi_k, res_k, sv_k, failed = state
-            # Only iterate if the initial residual was nonzero and we're still above tolerance
+            _k, _phi_k, res_k, _sv_k, failed = state
+            # Only iterate if the initial residual was nonzero and we're still above
+            # tolerance
             return jnp.logical_and(
                 res0 > 0.0, jnp.logical_and(res_k > 1e-10, jnp.logical_not(failed))
             )
 
         def proj_body(state):
-            k, phi_k, res_k, sv_k, failed = state
+            k, phi_k, _res_k, _sv_k, failed = state
 
             v_n, res_vec, sv_new = self._projection(phi_k)
             phi_next = phi_k + v_n
@@ -426,7 +429,7 @@ class BaseStepper(ABC):
             phi_pred = phi_new + delta * v_t
 
             # project back to manifold (capped loop)
-            phi_proj, res_norm, sv_new, proj_failed = self._projection_loop(phi_pred)
+            phi_proj, _res_norm, sv_new, proj_failed = self._projection_loop(phi_pred)
 
             # NaN check
             nan_failed = jnp.any(jnp.isnan(phi_proj))
@@ -487,7 +490,7 @@ class BaseStepper(ABC):
         jax.Array
             Scalar Boolean array controlling the outer JAX loop.
         """
-        step, active, phi_new, sv, phi_hist, sv_hist, status = carry
+        _step, active, _phi_new, _sv, _phi_hist, _sv_hist, _status = carry
         return active
 
     def _loop_body(
@@ -607,15 +610,15 @@ class BaseStepper(ABC):
                 carry, v_init, delta_0, delta_1, max_steps, phi_dtype
             )
 
-        stepf, _, phif, svf, phi_hist_f, sv_hist_f, statusf = jax.lax.while_loop(
+        stepf, _, _phif, _svf, phi_hist_f, sv_hist_f, statusf = jax.lax.while_loop(
             self._loop_cond, body, carry0
         )
         return phi_hist_f, sv_hist_f, stepf, statusf
 
     def run(
         self,
-        phi_init: Union[np.ndarray, jnp.ndarray],
-        v_init: Union[np.ndarray, jnp.ndarray],
+        phi_init: np.ndarray | jnp.ndarray,
+        v_init: np.ndarray | jnp.ndarray,
         delta_0: float = 2e-4,
         delta_1: float = 1e-3,
     ) -> tuple[np.ndarray, np.ndarray, list[str]]:

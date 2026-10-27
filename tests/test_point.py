@@ -1,6 +1,7 @@
-import pytest
 import numpy as np
-from pyphasediagram.point import Point, SpinodalPoint, CriticalPoint
+import pytest
+
+from pyphasediagram.point import Point, SpinodalPoint
 
 # ----------------------------
 # Tests: Point
@@ -100,14 +101,14 @@ def test_is_between_true_for_colinear_opposite_directions():
     pt = Point(0, 0.0, 0.0)
     pt1 = Point(1, 1.0, 0.0)
     pt2 = Point(2, -1.0, 0.0)
-    assert pt.is_between(pt1, pt2) == True
+    assert pt.is_between(pt1, pt2)
 
 
 def test_is_between_false_for_right_angle():
     pt = Point(0, 0.0, 0.0)
     pt1 = Point(1, 1.0, 0.0)
     pt2 = Point(2, 0.0, 1.0)
-    assert pt.is_between(pt1, pt2) == False
+    assert not pt.is_between(pt1, pt2)
 
 
 def test_is_between_raises_for_non_spinodalpoint():

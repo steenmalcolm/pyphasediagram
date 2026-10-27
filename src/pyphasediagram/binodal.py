@@ -7,10 +7,11 @@ provides helpers for plotting the resulting geometry and selecting a discrete
 phase decomposition for a prescribed mean composition.
 """
 
-from typing import Any, Optional
+from __future__ import annotations
+
+from typing import Any
 
 import matplotlib.pyplot as plt
-import networkx as nx
 import numpy as np
 import shapely
 
@@ -19,7 +20,8 @@ from pyphasediagram.stepper import Stepper
 from pyphasediagram.utils import free_energy
 
 
-# TODO: Additional duplicate section removal after task list is exhausted and unstable manifold is removed.
+# TODO: Additional duplicate section removal after task list is exhausted and unstable
+# manifold is removed.
 class BinodalSection:
     r"""Store one traced section of a two-phase coexistence curve.
 
@@ -61,7 +63,8 @@ class BinodalSection:
 
     def __init__(self, phis: np.ndarray, svs: np.ndarray) -> None:
         if phis.shape[2] != len(svs):
-            raise ValueError("phis and svs must have the same number of trace points")
+            msg = "phis and svs must have the same number of trace points"
+            raise ValueError(msg)
         self.phis = phis
         self.svs = svs
         self.line_a = shapely.LineString(phis[0].T)
@@ -155,7 +158,7 @@ class BinodalSection:
         return best, float(t[best])
 
     def _intersection_params(
-        self, self_idx: int, other: "BinodalSection", other_idx: int
+        self, self_idx: int, other: BinodalSection, other_idx: int
     ) -> list[tuple[int, float, int, float]]:
         """Find interpolation coordinates at intersections of two branches.
 
@@ -210,7 +213,7 @@ class BinodalSection:
         ]
 
     def intersects_with(
-        self, other: "BinodalSection"
+        self, other: BinodalSection
     ) -> list[tuple[np.ndarray, np.ndarray, np.ndarray]]:
         """Construct three-phase candidates from branch intersections.
 
@@ -239,9 +242,10 @@ class BinodalSection:
         interpolation along both paired branches.
         """
         if not isinstance(other, BinodalSection):
-            raise NotImplementedError(
+            msg = (
                 "intersects_with can only be computed between BinodalSection instances."
             )
+            raise NotImplementedError(msg)
 
         tp_points = []
         for self_idx, _ in enumerate(self._lines):
@@ -263,7 +267,7 @@ class BinodalSection:
 
         return tp_points
 
-    def contained_in(self, other: "BinodalSection", n_samples: int = 1000) -> bool:
+    def contained_in(self, other: BinodalSection, n_samples: int = 1000) -> bool:
         r"""Check whether this section approximately duplicates another.
 
         Parameters
@@ -287,18 +291,16 @@ class BinodalSection:
 
         Notes
         -----
-        Both assignments of this section's phase labels are tested because
-        coexistence is invariant under exchanging phases A and B. The test is directional
-        in that it only checks if this object is contained in ``other``, but not the reverse.
+        Both assignments of this section's phase labels are tested because coexistence
+        is invariant under exchanging phases A and B. The test is directional in that it
+        only checks if this object is contained in ``other``, but not the reverse.
         """
         if not isinstance(other, BinodalSection):
-            raise NotImplementedError(
-                "contained_in can only be computed between BinodalSection instances."
-            )
+            msg = "contained_in can only be computed between BinodalSection instances."
+            raise NotImplementedError(msg)
 
         # System invariant under swap of phase labeling
         for la, lb in [(self.line_a, self.line_b), (self.line_b, self.line_a)]:
-
             sa = np.linspace(0.0, la.length, n_samples)
             da = np.array([la.interpolate(si).distance(other.line_a) for si in sa])
 
@@ -389,8 +391,10 @@ class Binodal:
     SV_BRANCH_THRESHOLD = 1e-2
 
     def __init__(
-        self, chis: np.ndarray, critical_points: list[CriticalPoint] = []
+        self, chis: np.ndarray, critical_points: list[CriticalPoint] | None = None
     ) -> None:
+        if critical_points is None:
+            critical_points = []
         self.chis = chis
         self.critical_points = critical_points
         self.binodal_sections: list[BinodalSection] = []
@@ -426,7 +430,7 @@ class Binodal:
         recorded so similar initial points can be skipped later.
         """
         # Run the stepper to compute the binodal points along the section
-        phis, svs, flags = self._stepper.run(phi_init, v_init)
+        phis, svs, _flags = self._stepper.run(phi_init, v_init)
         # if len(flags):
         #     print("\t", end=" ")
         #     for flag in flags:
@@ -551,7 +555,7 @@ class Binodal:
         branching_points: list[BinodalInitialPoint] = []
         for bp in section._degenerate_points(self.SV_BRANCH_THRESHOLD):
             J = self._stepper._jac_fn(bp.phi_init)
-            U, S, Vt = self._stepper._svd(J, full_matrices=True)
+            _U, S, Vt = self._stepper._svd(J, full_matrices=True)
             if np.dot(Vt[-1], bp.v_init) > 0.98 and S[-1] < self.SV_BRANCH_THRESHOLD:
                 bp.v_init = np.asarray(Vt[-2])
                 bp.phi_init += bp.v_init * 1e-3
@@ -670,7 +674,7 @@ class Binodal:
                 self.two_phase_polygons.append(poly)
 
     def _remove_unstable_sections(
-        self, unstable_manifold: Optional[shapely.Polygon] = None
+        self, unstable_manifold: shapely.Polygon | None = None
     ) -> None:
         """Remove trace samples that enter a locally unstable region.
 
@@ -726,7 +730,8 @@ class Binodal:
 
         self.binodal_sections = stable_sections
 
-    # TODO: Currently only the closest tie line is selected. It would be better to do an interpolation between the two closest tie lines
+    # TODO: Currently only the closest tie line is selected. It would be better to do an
+    # interpolation between the two closest tie lines
     def decomposition_from_composition(
         self, phi_means: np.ndarray
     ) -> tuple[np.ndarray | None, float | None]:
@@ -852,8 +857,7 @@ class Binodal:
 
         if best_result is not None:
             return best_result, best_f
-        else:
-            return None, None
+        return None, None
 
     def plot_sections(self, **kwargs: Any) -> None:
         """Plot every stored binodal section on the current axes.

@@ -7,7 +7,7 @@
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
 project = "pyphasediagram"
-copyright = "2026, Malcolm Steen"
+copyright = "2026, Malcolm Steen"  # noqa: A001
 author = "Malcolm Steen"
 release = "0.1.0"
 
@@ -16,8 +16,6 @@ import sys
 
 proj_path = pathlib.Path(__file__).parents[2].resolve()
 sys.path.append(str(proj_path / "src"))
-
-import pyphasediagram
 
 
 # -- General configuration ---------------------------------------------------

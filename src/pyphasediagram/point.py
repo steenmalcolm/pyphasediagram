@@ -5,10 +5,10 @@ coordinates ``(phi1, phi2)``.  They also carry the direction and phase-pair
 information needed to initialize spinodal and binodal calculations.
 """
 
-from typing import Any, Iterator
+from collections.abc import Iterator
+from typing import Any
 
 import matplotlib.pyplot as plt
-import networkx as nx
 import numpy as np
 
 
@@ -64,9 +64,8 @@ class Point:
             If ``pt`` is not a :class:`Point` instance.
         """
         if not isinstance(pt, Point):
-            raise NotImplementedError(
-                "Distance can only be computed between Point instances."
-            )
+            msg = "Distance can only be computed between Point instances."
+            raise NotImplementedError(msg)
         return np.sqrt((self.phi1 - pt.phi1) ** 2 + (self.phi2 - pt.phi2) ** 2)
 
     def __repr__(self) -> str:
@@ -92,9 +91,8 @@ class Point:
             If ``pt`` is not a :class:`Point` instance.
         """
         if not isinstance(pt, Point):
-            raise NotImplementedError(
-                "Addition can only be performed between Point instances."
-            )
+            msg = "Addition can only be performed between Point instances."
+            raise NotImplementedError(msg)
         return np.array([self.phi1 + pt.phi1, self.phi2 + pt.phi2])
 
     def __sub__(self, pt: "Point") -> np.ndarray:
@@ -116,9 +114,8 @@ class Point:
             If ``pt`` is not a :class:`Point` instance.
         """
         if not isinstance(pt, Point):
-            raise NotImplementedError(
-                "Subtraction can only be performed between Point instances."
-            )
+            msg = "Subtraction can only be performed between Point instances."
+            raise NotImplementedError(msg)
         return np.array([self.phi1 - pt.phi1, self.phi2 - pt.phi2])
 
     def plot(self, s: float = 10, **kwargs: Any) -> None:
@@ -138,9 +135,7 @@ class Point:
         """
         plt.scatter(self.phi1, self.phi2, s=s, **kwargs)
 
-    def is_between(
-        self, pt1: "Point", pt2: "Point", tol: float = np.pi / 8
-    ) -> bool:
+    def is_between(self, pt1: "Point", pt2: "Point", tol: float = np.pi / 8) -> bool:
         """Check whether this point lies approximately between two points.
 
         The check compares the angle between the vectors from this point to
@@ -172,9 +167,8 @@ class Point:
         direction vectors can be normalized.
         """
         if not (isinstance(pt1, Point) and isinstance(pt2, Point)):
-            raise NotImplementedError(
-                "is_between can only be computed between Point instances."
-            )
+            msg = "is_between can only be computed between Point instances."
+            raise NotImplementedError(msg)
         self_to_1 = (pt1 - self) / np.linalg.norm(pt1 - self)
         self_to_2 = (pt2 - self) / np.linalg.norm(pt2 - self)
         cos_angle = np.dot(self_to_1, self_to_2)
@@ -201,9 +195,8 @@ class Point:
             If ``pt`` is not a :class:`Point` instance.
         """
         if not isinstance(pt, Point):
-            raise NotImplementedError(
-                "is_close_to can only be computed between Point instances."
-            )
+            msg = "is_close_to can only be computed between Point instances."
+            raise NotImplementedError(msg)
         return self.dist(pt) < tol
 
     def __iter__(self) -> Iterator[float]:
@@ -368,7 +361,10 @@ class CriticalPoint(Point):
 
     def __repr__(self) -> str:
         """Return a representation containing coordinates and direction."""
-        return f"CriticalPoint(phi1={self.phi1:.3f}, phi2={self.phi2:.3f}, dphi1={self.dphi1:.3f}, dphi2={self.dphi2:.3f})"
+        return (
+            f"CriticalPoint(phi1={self.phi1:.3f}, phi2={self.phi2:.3f}, "
+            f"dphi1={self.dphi1:.3f}, dphi2={self.dphi2:.3f})"
+        )
 
 
 class BinodalPoint:
@@ -393,9 +389,7 @@ class BinodalPoint:
         Composition of phase B, assigned point index 1.
     """
 
-    def __init__(
-        self, phi1a: float, phi2a: float, phi1b: float, phi2b: float
-    ) -> None:
+    def __init__(self, phi1a: float, phi2a: float, phi1b: float, phi2b: float) -> None:
         self.pta = Point(0, phi1a, phi2a)
         self.ptb = Point(1, phi1b, phi2b)
 
@@ -416,11 +410,14 @@ class BinodalPoint:
             Binodal point containing the coordinates of ``pt1`` and ``pt2``.
 
         """
-        return cls(pt1.phi1, pt1.phi2, pt2.phi1, pt2.phi2, sv)
+        return cls(pt1.phi1, pt1.phi2, pt2.phi1, pt2.phi2)
 
     def __repr__(self) -> str:
         """Return a representation containing both phase compositions."""
-        return f"BinodalPoint(phi_a=({self.pta.phi1:.4f}, {self.pta.phi2:.4f}), phi_b=({self.ptb.phi1:.4f}, {self.ptb.phi2:.4f}))"
+        return (
+            f"BinodalPoint(phi_a=({self.pta.phi1:.4f}, {self.pta.phi2:.4f}), "
+            f"phi_b=({self.ptb.phi1:.4f}, {self.ptb.phi2:.4f}))"
+        )
 
     def to_numpy(self) -> np.ndarray:
         """Return both phase compositions as a flat array.
@@ -574,7 +571,10 @@ class BinodalInitialPoint(BinodalPoint):
 
     def __repr__(self) -> str:
         """Return a representation of the phases and tracing direction."""
-        return f"BinodalInitialPoint(phi_a=({self.pta.phi1:.4f}, {self.pta.phi2:.4f}), phi_b=({self.ptb.phi1:.4f}, {self.ptb.phi2:.4f}), v_init={self.v_init})"
+        return (
+            f"BinodalInitialPoint(phi_a=({self.pta.phi1:.4f}, {self.pta.phi2:.4f}), "
+            f"phi_b=({self.ptb.phi1:.4f}, {self.ptb.phi2:.4f}), v_init={self.v_init})"
+        )
 
     def __iter__(self) -> Iterator[np.ndarray]:
         """Iterate over the initial coordinates and normalized direction.

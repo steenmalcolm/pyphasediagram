@@ -7,20 +7,27 @@ locates critical points, and constructs polygons used to identify the
 locally unstable region.
 """
 
+from __future__ import annotations
+
 import warnings
-from typing import Any, Optional, Union
+from typing import TYPE_CHECKING, Any, Union
 
 import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
 import shapely
-from numpy.typing import ArrayLike
 
 from pyphasediagram.point import CriticalPoint, SpinodalPoint
 
+if TYPE_CHECKING:
+    from numpy.typing import ArrayLike
+
 FloatOrArray = Union[float, np.ndarray]
 
-# TODO: Throw error if polygons don't match number of connected components. This happens for chi=2.667
+# TODO: Throw error if polygons don't match number of connected components. This happens
+# for chi=2.667
+
+DOMAIN_CORNERS = [(0, 0), (0, 1), (1, 0)]
 
 
 class Spinodal:
@@ -34,9 +41,6 @@ class Spinodal:
 
     Attributes
     ----------
-    DOMAIN_CORNERS : list of tuple
-        Vertices ``[(0, 0), (0, 1), (1, 0)]`` of the closed composition
-        simplex.
     chis : numpy.ndarray
         Reduced interaction matrix with shape ``(2, 2)``.
     spinodal_graph : networkx.Graph
@@ -63,13 +67,10 @@ class Spinodal:
     ``phi0 = 1 - phi1 - phi2``.
     """
 
-    DOMAIN_CORNERS = [(0, 0), (0, 1), (1, 0)]
-
     def __init__(self, chis: np.ndarray) -> None:
         if chis.shape != (2, 2):
-            raise ValueError(
-                f"Expected chis to be a 2x2 matrix, but got shape {chis.shape}"
-            )
+            msg = f"Expected chis to be a 2x2 matrix, but got shape {chis.shape}"
+            raise ValueError(msg)
         self.chis = chis
         self.spinodal_graph = nx.Graph()
         self.node_id = 0
@@ -99,12 +100,12 @@ class Spinodal:
 
         Notes
         -----
-        The build pipeline samples the analytic branches, clips them to the
-        physically admissible domain, connects nearby branches, locates
-        critical points, and constructs polygons which contain the locally stable regions in composition space.
-        Existing graph nodes, critical points, and polygons are cleared before
-        rebuilding, so repeated calls replace rather than append to the
-        calculated state.
+        The build pipeline samples the analytic branches, clips them to the physically
+        admissible domain, connects nearby branches, locates critical points, and
+        constructs polygons which contain the locally stable regions in composition
+        space. Existing graph nodes, critical points, and polygons are cleared before
+        rebuilding, so repeated calls replace rather than append to the calculated
+        state.
         """
         self.spinodal_graph = nx.Graph()
         self.node_id = 0
@@ -142,7 +143,7 @@ class Spinodal:
             Constant term in ``quadratic*x**2 + linear*x + constant = 0``.
         """
         a, b, c = self.chis[1, 1], self.chis[0, 0], self.chis[0, 1]
-        if is_calculate_phi2 == False:
+        if not is_calculate_phi2:
             a, b = b, a  # swap a and b if computing phi1 from phi2
 
         det = a * b - c**2
@@ -154,7 +155,7 @@ class Spinodal:
     @staticmethod
     def _polynomial_degree_masks(
         quadratic: ArrayLike, linear: ArrayLike, constant: ArrayLike
-    ) -> tuple[Union[bool, np.ndarray], Union[bool, np.ndarray]]:
+    ) -> tuple[bool | np.ndarray, bool | np.ndarray]:
         """Classify polynomial samples as quadratic or linear.
 
         Coefficients smaller than floating-point resolution relative to the
@@ -353,7 +354,7 @@ class Spinodal:
 
         # Iterate over both branches
         for phi2_vals in phi2_branches:
-            pt_prev: Optional[SpinodalPoint] = None
+            pt_prev: SpinodalPoint | None = None
             for phi1, phi2 in zip(phi1_vals, phi2_vals):
                 if not (np.isfinite(phi1) and np.isfinite(phi2)):
                     pt_prev = None
@@ -430,7 +431,7 @@ class Spinodal:
         return np.asarray(domain_endpoints, dtype=float)
 
     @classmethod
-    def _in_domain(cls, phi1: ArrayLike, phi2: ArrayLike) -> Union[bool, np.ndarray]:
+    def _in_domain(cls, phi1: ArrayLike, phi2: ArrayLike) -> bool | np.ndarray:
         """Check whether compositions lie in the open ternary domain.
 
         Parameters
@@ -494,12 +495,13 @@ class Spinodal:
         once during a call.
         """
 
-        # TODO: Check if minimum bounding squares of subgraphs overlap before computing pairwise distances to speed up for large graphs
+        # TODO: Check if minimum bounding squares of subgraphs overlap before computing
+        # pairwise distances to speed up for large graphs
         if self.spinodal_graph.number_of_nodes() == 0:
             return
 
         comps = list(nx.connected_components(self.spinodal_graph))
-        n = len(comps)
+        len(comps)
 
         # Endpoints have degree 1
         endpoints = [
@@ -507,7 +509,8 @@ class Spinodal:
             for pt in self.spinodal_graph.nodes()
             if self.spinodal_graph.degree[pt] == 1
         ]
-        # Keep track of endpoints we've already connected to avoid adding multiple edges from the same endpoint in cases where more than 2 branches are close together
+        # Keep track of endpoints we've already connected to avoid adding multiple edges
+        # from the same endpoint in cases where more than 2 branches are close together.
         invalid_endpoints = []
 
         for i, epti in enumerate(endpoints):
@@ -517,7 +520,8 @@ class Spinodal:
                 if eptj in invalid_endpoints:
                     continue
                 dist = epti.dist(eptj)
-                # Note this is a greedy algorithm, might need elaborate testing to make sure it works
+                # Note this is a greedy algorithm, might need elaborate testing to make
+                # sure it works
                 if dist < 0.05:
                     nb_epti = next(self.spinodal_graph.neighbors(epti))
                     nb_eptj = next(self.spinodal_graph.neighbors(eptj))
@@ -648,7 +652,6 @@ class Spinodal:
         :attr:`critical_points`; the existing list is not cleared.
         """
         for comp in nx.connected_components(self.spinodal_graph):
-
             sg = self.spinodal_graph.subgraph(comp)
             phi1, phi2 = self._coords_from_subgraph(sg)
             mask = self._in_domain(phi1, phi2)
@@ -656,10 +659,11 @@ class Spinodal:
 
             third_deriv = self._third_derivative(phi1, phi2)
             if np.isnan(third_deriv).any():
-
-                raise ValueError(
-                    "NaN values found in third derivative, check for invalid phi1/phi2 values."
+                msg = (
+                    "NaN values found in third derivative, check for invalid phi1/phi2 "
+                    "values."
                 )
+                raise ValueError(msg)
             # Edge case where third derivative has extrema at root
             extrema_idxs = np.where(np.diff(np.sign(np.diff(third_deriv))))[0] + 1
             for extrema_idx in extrema_idxs:
@@ -677,7 +681,8 @@ class Spinodal:
             for r_idx in root_idxs:
                 dphi1 = phi1[r_idx + 1] - phi1[r_idx]
                 dphi2 = phi2[r_idx + 1] - phi2[r_idx]
-                # For np.interp to work, we need to ensure the third_deriv values at r_idx and r_idx+1 are in increasing order. If not, swap them.
+                # For np.interp to work, we need to ensure the third_deriv values at
+                # r_idx and r_idx+1 are in increasing order. If not, swap them.
                 xp = third_deriv[r_idx : r_idx + 2]
                 phi1p, phi2p = phi1[r_idx : r_idx + 2], phi2[r_idx : r_idx + 2]
                 o = np.argsort(third_deriv[r_idx : r_idx + 2])
@@ -693,11 +698,14 @@ class Spinodal:
                         stacklevel=2,
                     )
                 if abs(td_c) >= np.std(xp):
-                    raise RuntimeError(
-                        f"Third derivative at critical point ({phi1_c:.2f}, {phi2_c:.2f}) is not close to zero: {td_c:.5f}\n"
-                        f"(chi_11, chi_22, chi_12)=({self.chis[0, 0]}, {self.chis[1, 1]}, {self.chis[0, 1]})\n"
+                    msg = (
+                        f"Third derivative at critical point ({phi1_c:.2f}, "
+                        f"{phi2_c:.2f}) is not close to zero: {td_c:.5f}\n"
+                        f"(chi_11, chi_22, chi_12)=({self.chis[0, 0]}, "
+                        f"{self.chis[1, 1]}, {self.chis[0, 1]})\n"
                         f"Try increasing resolution of spinodal curve."
                     )
+                    raise RuntimeError(msg)
                 self.critical_points.append(
                     CriticalPoint(-1, phi1_c, phi2_c, dphi1, dphi2)
                 )
@@ -728,7 +736,8 @@ class Spinodal:
         for comp_idx, comp in enumerate(nx.connected_components(self.spinodal_graph)):
             sg = self.spinodal_graph.subgraph(comp).copy()
 
-            # Add boundary point if endpoint is close to boundary, such that polygons don't cut through unstable region.
+            # Add boundary point if endpoint is close to boundary, such that polygons
+            # don't cut through unstable region.
             endpoints = [n for n, d in sg.degree() if d == 1]
             if len(endpoints) == 2:
                 for e in endpoints:
@@ -740,15 +749,14 @@ class Spinodal:
                     elif e.phi1 + e.phi2 > 1 - 1e-2:
                         boundary_point = SpinodalPoint(-1, e.phi1, 1 - e.phi1)
                     else:
-                        # Edge case where displacement between e and its neighbor is vertical, such that the resolution is quite bad
+                        # Edge case where displacement between e and its neighbor is
+                        # vertical, such that the resolution is quite bad
                         nb = next(sg.neighbors(e))
                         d = e - nb
                         angle_from_vertical = np.arctan2(abs(d[0]), abs(d[1]))
-                        if (
-                            angle_from_vertical < 0.01
-                        ):  # if angle with vertical is less than 0.01 radians (~0.57 degrees)
+                        if angle_from_vertical < 0.01:
+                            # angle is less than 0.01 radians (~0.57 degrees)
                             if d[1] < 0:
-
                                 boundary_point = SpinodalPoint(-1, e.phi1, 0)
                             else:
                                 boundary_point = SpinodalPoint(-1, e.phi1, 1 - e.phi1)
@@ -772,19 +780,19 @@ class Spinodal:
                         is_add_corner[i] += (1 << 1) + (
                             1 << 2
                         )  # add corners (0,1) and (1,0)
-                # Remove the corner which both endpoints have in common
-                # This guarantees that if both endpoints are on the same edge, we don't add any corners
-                # and if they are on different edges we add the correct corners such that the polygon encloses the locally stable area of the domain
+                # Remove the corner which both endpoints have in common. This guarantees
+                # that if both endpoints are on the same edge, we don't add any corners
+                # and if they are on different edges we add the correct corners such
+                # that the polygon encloses the locally stable area of the domain
                 common_corners = is_add_corner[0] & is_add_corner[1]
                 if is_add_corner[0] ^ is_add_corner[1] > 0:
-                    corner = self.DOMAIN_CORNERS[common_corners.bit_length() - 1]
+                    corner = DOMAIN_CORNERS[common_corners.bit_length() - 1]
                     sg.add_node(SpinodalPoint(-1, corner[0], corner[1]))
                     sg.add_edge(endpoints[0], SpinodalPoint(-1, corner[0], corner[1]))
 
             phi1, phi2 = self._coords_from_subgraph(sg)
             coords = np.column_stack((phi1, phi2))
             if len(coords) >= 3:  # Need at least 3 points to form a polygon
-
                 poly = shapely.make_valid(shapely.geometry.Polygon(coords))
                 if poly.is_valid:
                     center = poly.centroid
@@ -793,29 +801,30 @@ class Spinodal:
                         continue
 
                     if ev1 * ev2 < 0:
-                        poly = shapely.geometry.Polygon(self.DOMAIN_CORNERS).difference(
-                            poly
-                        )
+                        poly = shapely.geometry.Polygon(DOMAIN_CORNERS).difference(poly)
                     for other in self.polygons:
                         if poly.intersects(other):
                             # Edge case where overlap is a line or point
                             if poly.intersection(other).area < 1e-10:
                                 continue
                             poly = poly.intersection(other)
-                            # Remove the other polygon from the list since it's now merged with the current one
+                            # Remove the other polygon from the list since it's now
+                            # merged with the current one
                             self.polygons.remove(other)
                             break
                     self.polygons.append(poly)
                 else:
                     print(
-                        "Warning: Invalid polygon formed from spinodal component, skipping polygon creation for this component."
+                        "Warning: Invalid polygon formed from spinodal component, "
+                        "skipping polygon creation for this component."
                     )
             else:
                 print(
-                    "Warning: Not enough points to form a polygon for this spinodal component, skipping polygon creation for this component."
+                    "Warning: Not enough points to form a polygon for this spinodal "
+                    "component, skipping polygon creation for this component."
                 )
 
-    def get_unstable_manifold(self) -> Optional[shapely.geometry.Polygon]:
+    def get_unstable_manifold(self) -> shapely.geometry.Polygon | None:
         """Return the locally unstable region of the composition simplex.
 
         Returns
@@ -831,12 +840,11 @@ class Spinodal:
             first.
         """
         if self.polygons is None:
-            raise ValueError(
-                "Polygons have not been built yet. Call _build_polygons() first."
-            )
+            msg = "Polygons have not been built yet. Call _build_polygons() first."
+            raise ValueError(msg)
         if len(self.polygons) == 0:
             return None
-        polygon = shapely.geometry.Polygon(self.DOMAIN_CORNERS)
+        polygon = shapely.geometry.Polygon(DOMAIN_CORNERS)
         for poly in self.polygons:
             polygon = shapely.make_valid(polygon.difference(poly))
         return polygon
@@ -919,6 +927,6 @@ if __name__ == "__main__":
         plt.savefig(f"delete/{i}.png")
         plt.close()
         print(
-            f"Completed iteration {i+1}/100 in {time.perf_counter() - n:.2f} seconds."
+            f"Completed iteration {i + 1}/100 in {time.perf_counter() - n:.2f} seconds."
         )
         i += 1

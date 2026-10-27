@@ -5,8 +5,9 @@ from shapely import LineString
 
 from pyphasediagram.spinodal import CriticalPoint, Spinodal, SpinodalPoint
 
-# TODO: Add End-to-end tests that build a full spinodal graph and check for expected properties such as geometry and orientation of critical point
-# and include tests on symmetric system for 2.5<chi<3.2
+# TODO: Add End-to-end tests that build a full spinodal graph and check for expected
+# properties such as geometry and orientation of critical point and include tests on
+# symmetric system for 2.5<chi<3.2
 
 
 def _make_path_subgraph(points):
@@ -205,7 +206,8 @@ def test_clip_to_domain_removes_outside_and_singletons(simple_chis):
     sp._clip_to_domain()
 
     remaining = set(sp.spinodal_graph.nodes())
-    assert a0 in remaining and a1 in remaining
+    assert a0 in remaining
+    assert a1 in remaining
     assert bad1 not in remaining
     assert bad2 not in remaining
     assert bad3 not in remaining
@@ -461,28 +463,28 @@ def test_find_critical_points_raises_on_nan_third_derivative(monkeypatch, simple
 
 class TestInDomain:
     def test_interior_point(self):
-        assert Spinodal._in_domain(0.2, 0.3) == True
+        assert Spinodal._in_domain(0.2, 0.3)
 
     def test_origin_excluded(self):
-        assert Spinodal._in_domain(0.0, 0.0) == False
+        assert not Spinodal._in_domain(0.0, 0.0)
 
     def test_boundary_excluded(self):
-        assert Spinodal._in_domain(0.5, 0.5) == False  # phi1 + phi2 == 1
-        assert Spinodal._in_domain(0.0, 0.5) == False  # phi1 == 0
-        assert Spinodal._in_domain(0.5, 0.0) == False  # phi2 == 0
+        assert not Spinodal._in_domain(0.5, 0.5)  # phi1 + phi2 == 1
+        assert not Spinodal._in_domain(0.0, 0.5)  # phi1 == 0
+        assert not Spinodal._in_domain(0.5, 0.0)  # phi2 == 0
 
     def test_corner_points_excluded(self):
-        assert Spinodal._in_domain(0.0, 1.0) == False
-        assert Spinodal._in_domain(1.0, 0.0) == False
+        assert not Spinodal._in_domain(0.0, 1.0)
+        assert not Spinodal._in_domain(1.0, 0.0)
 
     def test_outside_negative_phi1(self):
-        assert Spinodal._in_domain(-0.1, 0.5) == False
+        assert not Spinodal._in_domain(-0.1, 0.5)
 
     def test_outside_negative_phi2(self):
-        assert Spinodal._in_domain(0.5, -0.1) == False
+        assert not Spinodal._in_domain(0.5, -0.1)
 
     def test_outside_sum_exceeds_one(self):
-        assert Spinodal._in_domain(0.6, 0.5) == False
+        assert not Spinodal._in_domain(0.6, 0.5)
 
     def test_array_input(self):
         phi1 = np.array([0.2, -0.1, 0.6, 0.0])
@@ -691,14 +693,10 @@ def test_plot_skips_components_containing_nan(monkeypatch, simple_chis):
     )
 
 
-import networkx as nx
-
 # tests/test_spinodal_e2e.py
 import numpy as np
 import pytest
 import shapely
-
-from pyphasediagram.spinodal import Spinodal
 
 # ----------------------------
 # Helpers
@@ -733,7 +731,8 @@ def _build_spinodal_or_skip(chis: np.ndarray, num_points=800) -> Spinodal:
 
 
 def _assert_point_in_simplex(phi1, phi2, tol=1e-12):
-    assert np.isfinite(phi1) and np.isfinite(phi2)
+    assert np.isfinite(phi1)
+    assert np.isfinite(phi2)
     assert phi1 >= -tol
     assert phi2 >= -tol
     assert phi1 <= 1 + tol
@@ -751,7 +750,8 @@ def _assert_point_in_simplex(phi1, phi2, tol=1e-12):
 )
 @pytest.mark.parametrize("seed", list(range(100)))
 def test_e2e_spinodal_invariants_random_chis(seed):
-    """This is a broad end-to-end test that builds many spinodal graphs from random chi parameters and checks key invariants"""
+    """This is a broad end-to-end test that builds many spinodal graphs from random chi
+    parameters and checks key invariants"""
     rng = np.random.default_rng(seed)
     chis = _random_chis(rng, -10.0, 10.0)
 
@@ -787,14 +787,15 @@ def test_e2e_spinodal_invariants_random_chis(seed):
         closest_nodes = sorted(zip(distances, nodes))[:2]
         assert len(closest_nodes) == 2
 
-        # Ensure the absolute value of the third derivative at the adjacent nodes is larger
+        # Ensure absolute value of the third derivative at the adjacent nodes is larger
         td_adj_1 = sp._third_derivative(
             closest_nodes[0][1].phi1, closest_nodes[0][1].phi2
         )
         td_adj_2 = sp._third_derivative(
             closest_nodes[1][1].phi1, closest_nodes[1][1].phi2
         )
-        assert np.isfinite(td_adj_1) and np.isfinite(td_adj_2)
+        assert np.isfinite(td_adj_1)
+        assert np.isfinite(td_adj_2)
         assert abs(td_adj_1) > abs(td_cp)
         assert abs(td_adj_2) > abs(td_cp)
 
@@ -805,7 +806,8 @@ def test_e2e_spinodal_invariants_random_chis(seed):
             assert len(nb) == 2
             assert n.is_between(nb[0], nb[1], tol=np.pi / 6)
 
-    # --- 6) Each connected component is either a simple path (2 endpoints) or a cycle (0 endpoints)
+    # --- 6) Each connected component is either a simple path (2 endpoints) or a cycle
+    #        (0 endpoints)
     for comp in nx.connected_components(G):
         sg = G.subgraph(comp)
         endpoint_count = sum(1 for _, d in sg.degree() if d == 1)
@@ -833,7 +835,8 @@ def test_e2e_spinodal_invariants_random_chis(seed):
         )
         assert dmin < 0.05  # tune based on resolution
 
-    # --- 10) Random points inside locally-stable polygons have both eigenvalues positive
+    # --- 10) Random points inside locally-stable polygons have both eigenvalues
+    #         positive
     if sp.polygons:
         for poly in sp.polygons:
             if poly.is_empty:
@@ -850,13 +853,14 @@ def test_e2e_spinodal_invariants_random_chis(seed):
                 ) and Spinodal._in_domain(px, py):
                     ev1, ev2 = sp.eigenvalues_from_phi(px, py)
                     ev_norm = np.sqrt(ev1**2 + ev2**2)
-                    # Allow some slack for numerical issues, but generally should be positive in stable region.
-                    assert (
-                        ev1 / ev_norm > -1e-4
-                    ), f"ev1={ev1} not positive at ({px}, {py})"
-                    assert (
-                        ev2 / ev_norm > -1e-4
-                    ), f"ev2={ev2} not positive at ({px}, {py})"
+                    # Allow some slack for numerical issues, but generally should be
+                    # positive in stable region.
+                    assert ev1 / ev_norm > -1e-4, (
+                        f"ev1={ev1} not positive at ({px}, {py})"
+                    )
+                    assert ev2 / ev_norm > -1e-4, (
+                        f"ev2={ev2} not positive at ({px}, {py})"
+                    )
                     n_samples += 1
 
 
@@ -866,17 +870,17 @@ def test_e2e_spinodal_invariants_random_chis(seed):
 @pytest.mark.parametrize("chi", np.linspace(2.1, 3.5, 29))
 def test_e2e_spinodal_invariants_symmetric_case(chi):
     """
-    A targeted e2e test: symmetric matrix should produce spinodal branches with the same shape.
-    The number of critical points and branches should match known behavior for symmetric case as chi is varied.
+    A targeted e2e test: symmetric matrix should produce spinodal branches with the same
+    shape. The number of critical points and branches should match known behavior for
+    symmetric case as chi is varied.
     """
 
     # Use shapely to determine if spinodal branches have same shape
     import shapely
 
     if chi == 3:
-        return
         pytest.skip(
-            "Skipping chi=3 due to known numerical issues with second order phase transition"
+            "Skipping chi=3 due to known numerical issues with 2nd order transition"
         )
 
     chis = np.array([[-2 * chi, -chi], [-chi, -2 * chi]], dtype=float)
@@ -926,7 +930,7 @@ def test_e2e_spinodal_invariants_symmetric_case(chi):
                     intsct_obj = line_compare.intersection(line)
                     num_rotations += 1
 
-                    # Fail if num_rotations exceeds 3 (full cycle) without finding a match
+                    # Fail if num_rotations exceeds 3 (full cycle) without finding match
                     assert num_rotations < 3
 
                 # should have many intersection points if shapes match

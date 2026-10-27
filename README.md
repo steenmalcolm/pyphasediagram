@@ -14,4 +14,14 @@ pip install -e .
 ```
 
 ## Usage
+
 There is a simple example in the `examples` folder.
+
+## Development
+
+Install the pre-commit hooks to ensure code formatting using 
+
+```bash
+pip install pre-commit
+pre-commit install
+```

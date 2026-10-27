@@ -41,17 +41,22 @@ def reduce_chis(chis: ArrayLike) -> np.ndarray:
 
     Notes
     -----
-    The Flory--Huggins parameter of the full interaction matrix appear in the free-energy density as
+    The Flory--Huggins parameter of the full interaction matrix appear in the
+    free-energy density as
 
     .. math::
-        f(\phi_0, \phi_1, \phi_2) = \phi_0 \ln \phi_0 + \phi_1 \ln \phi_1 + \phi_2 \ln \phi_2
-        + \phi_0 \chi_{01} \phi_1 + \phi_0 \chi_{02} \phi_2 + \phi_1 \chi_{12} \phi_2
+        f(\phi_0, \phi_1, \phi_2) =
+            \phi_0 \ln \phi_0 + \phi_1 \ln \phi_1 + \phi_2 \ln \phi_2
+            + \phi_0 \chi_{01} \phi_1
+            + \phi_0 \chi_{02} \phi_2
+            + \phi_1 \chi_{12} \phi_2
     """
     chis = np.asarray(chis, dtype=float)
     if chis.shape == (2, 2):
         return chis
     if chis.shape != (3, 3):
-        raise ValueError(f"chis must be a 2x2 or a 3x3 array, but got {chis.shape}")
+        msg = f"chis must be a 2x2 or a 3x3 array, but got {chis.shape}"
+        raise ValueError(msg)
 
     chi_01, chi_02, chi_12 = chis[0, 1], chis[0, 2], chis[1, 2]
     off_diagonal = chi_12 - chi_01 - chi_02
@@ -61,9 +66,8 @@ def reduce_chis(chis: ArrayLike) -> np.ndarray:
 def _as_compositions(phi: ArrayLike) -> np.ndarray:
     phi = np.asarray(phi, dtype=float)
     if phi.ndim == 0 or phi.shape[0] != 2:
-        raise ValueError(
-            f"phi must have a leading axis of length 2, but got shape {phi.shape}"
-        )
+        msg = f"phi must have a leading axis of length 2, but got shape {phi.shape}"
+        raise ValueError(msg)
     return phi
 
 
