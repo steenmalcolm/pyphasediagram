@@ -11,6 +11,15 @@ copyright = "2026, Malcolm Steen"
 author = "Malcolm Steen"
 release = "0.1.0"
 
+import pathlib
+import sys
+
+proj_path = pathlib.Path(__file__).parents[2].resolve()
+sys.path.append(str(proj_path / "src"))
+
+import pyphasediagram
+
+
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
 
