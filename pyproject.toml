@@ -23,7 +23,15 @@ classifiers = [
 ]
 requires-python = ">=3.9"
 dynamic = ["version"]
-dependencies = ["mpltern >= 1.0.5, < 2"]
+dependencies = [
+  "jax>=0.4",
+  "matplotlib",
+  "mpltern>=1.0.5,<2",
+  "networkx",
+  "numpy",
+  "scipy",
+  "shapely>=2",
+]
 
 [project.optional-dependencies]
 dev = ["pytest >= 6.0.0"]

@@ -10,7 +10,6 @@ It includes a core class:
 After cloning the repository and navigating into the project directory, install the package using pip:
 
 ```bash
-pip install -r requirements.txt
 pip install -e .
 ```
 
