@@ -77,9 +77,7 @@ def _cancel_alarm():
 # ---------------------------------------------------------------------------
 # Chi-matrix generation (mirrors diagram.py main loop)
 # ---------------------------------------------------------------------------
-def random_chi_matrices(
-    rng: np.random.Generator, chi: float = 2.75, spread: float = 0.4
-):
+def random_chi_matrices(rng: np.random.Generator, chi: float = 2.75, spread: float = 0.4):
     chi_01, chi_02, chi_12 = (rng.random(3) - 0.5) * spread + chi
 
     chis_3x3 = np.array(
@@ -221,9 +219,9 @@ def validate_two_phase(
             # Flory finds lower energy => error in algorithm
             if delta_f > 0:
                 # Check if a better decomposition exists
-                alt = binodal.decomposition_from_composition(phi_ab)
-                if alt is not None:
-                    f_alt = _decomposition_energy(chis_reduced, phi_ab, alt)
+                alt_phases, _ = binodal.decomposition_from_composition(phi_ab)
+                if alt_phases is not None:
+                    f_alt = _decomposition_energy(chis_reduced, phi_ab, alt_phases)
                     if f_alt is not None and f_alt < f_binodal:
                         f_binodal = f_alt
                         delta_f = f_binodal - f_flory
@@ -281,9 +279,7 @@ def validate_three_phase(
                 continue
 
             phi_means = [1 - px - py, px, py]
-            phases = flory.find_coexisting_phases(
-                3, chis_3x3, phi_means, progress=False
-            )
+            phases = flory.find_coexisting_phases(3, chis_3x3, phi_means, progress=False)
             sig = phases.volumes > 0.01
             n_phases = int(sig.sum())
 
@@ -341,9 +337,7 @@ def validate_three_phase(
 # Main loop
 # ---------------------------------------------------------------------------
 def main():
-    parser = argparse.ArgumentParser(
-        description="Validate pyphasediagram against flory"
-    )
+    parser = argparse.ArgumentParser(description="Validate pyphasediagram against flory")
     parser.add_argument(
         "-n",
         "--n-diagrams",
@@ -357,9 +351,7 @@ def main():
         default=20,
         help="Total samples per diagram (split by phase-region area)",
     )
-    parser.add_argument(
-        "--tol", type=float, default=5e-2, help="Two-phase error tolerance"
-    )
+    parser.add_argument("--tol", type=float, default=5e-2, help="Two-phase error tolerance")
     parser.add_argument(
         "--timeout",
         type=int,
@@ -394,9 +386,7 @@ def main():
                 binodal.build(unstable_manifold=spinodal.get_unstable_manifold())
                 _cancel_alarm()
             except _Timeout:
-                tqdm.write(
-                    f"Timeout building diagram for chis_reduced =\n{chis_reduced}"
-                )
+                tqdm.write(f"Timeout building diagram for chis_reduced =\n{chis_reduced}")
                 _cancel_alarm()
                 continue
             except Exception as e:
@@ -421,12 +411,8 @@ def main():
                 n_2phase = args.n_per_diagram
                 n_3phase = 0
 
-            two_phase = validate_two_phase(
-                binodal, chis_3x3, chis_reduced, rng, n_2phase, args.tol
-            )
-            three_phase = validate_three_phase(
-                binodal, chis_3x3, chis_reduced, rng, n_3phase
-            )
+            two_phase = validate_two_phase(binodal, chis_3x3, chis_reduced, rng, n_2phase, args.tol)
+            three_phase = validate_three_phase(binodal, chis_3x3, chis_reduced, rng, n_3phase)
 
             n2_pass = sum(r["pass"] for r in two_phase)
             n2_total = len(two_phase)
@@ -452,9 +438,7 @@ def main():
             }
             results.append(entry)
 
-            pbar.set_postfix(
-                {"2ph": f"{n2_pass}/{n2_total}", "3ph": f"{n3_pass}/{n3_total}"}
-            )
+            pbar.set_postfix({"2ph": f"{n2_pass}/{n2_total}", "3ph": f"{n3_pass}/{n3_total}"})
             pbar.update(1)
             completed += 1
     except KeyboardInterrupt:
@@ -562,9 +546,7 @@ def _plot_phase_diagram(spinodal, binodal, ax):
         )
 
     ax.plot([0, 1], [1, 0], "k-", linewidth=0.5)
-    ax.set(
-        xlim=(0, 1), ylim=(0, 1), xlabel=r"$\phi_1$", ylabel=r"$\phi_2$", aspect="equal"
-    )
+    ax.set(xlim=(0, 1), ylim=(0, 1), xlabel=r"$\phi_1$", ylabel=r"$\phi_2$", aspect="equal")
 
 
 def analyze_flory_wins(flory_wins: list[dict]):
@@ -611,9 +593,7 @@ def analyze_flory_wins(flory_wins: list[dict]):
             # Binodal three-phase triangle
             tri_x = [*list(binodal_phis[:, 0]), binodal_phis[0, 0]]
             tri_y = [*list(binodal_phis[:, 1]), binodal_phis[0, 1]]
-            ax.plot(
-                tri_x, tri_y, "g-o", markersize=6, linewidth=2, label="Binodal 3-phase"
-            )
+            ax.plot(tri_x, tri_y, "g-o", markersize=6, linewidth=2, label="Binodal 3-phase")
             # Flory compositions
             ax.scatter(
                 flory_phis[:, 0],

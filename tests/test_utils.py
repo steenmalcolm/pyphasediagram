@@ -90,22 +90,12 @@ class TestFreeEnergy:
         h = 1e-6
         grad = np.array(
             [
-                (
-                    free_energy(phi + h * e, chis_full)
-                    - free_energy(phi - h * e, chis_full)
-                )
+                (free_energy(phi + h * e, chis_full) - free_energy(phi - h * e, chis_full))
                 / (2 * h)
                 for e in np.eye(2)
             ]
         )
-        assert np.allclose(
-            grad, exchange_chemical_potentials(phi, chis_full), atol=1e-6
-        )
-
-    @pytest.mark.parametrize("shape", [(3,), (1, 4), ()])
-    def test_rejects_invalid_phi_shape(self, chis_full, shape):
-        with pytest.raises(ValueError, match="leading axis of length 2"):
-            free_energy(np.full(shape, 0.2), chis_full)
+        assert np.allclose(grad, exchange_chemical_potentials(phi, chis_full), atol=1e-6)
 
     def test_rejects_invalid_chis_shape(self):
         with pytest.raises(ValueError, match="2x2 or a 3x3"):
@@ -142,9 +132,7 @@ class TestExchangeChemicalPotentials:
         phis = np.array([[0.1, 0.3, 0.5], [0.2, 0.4, 0.1]])
         mu = exchange_chemical_potentials(phis, chis_full)
         for k in range(3):
-            assert np.allclose(
-                mu[:, k], exchange_chemical_potentials(phis[:, k], chis_full)
-            )
+            assert np.allclose(mu[:, k], exchange_chemical_potentials(phis[:, k], chis_full))
 
     def test_matches_stepper_residual(self, chis_full):
         """The difference between two phases equals the stepper's chemical-potential
@@ -153,15 +141,10 @@ class TestExchangeChemicalPotentials:
         phi_b = np.array([0.3, 0.4])
         stepper = Stepper(reduce_chis(chis_full))
         residual = np.asarray(stepper.residual(np.concatenate([phi_a, phi_b])))
-        delta_mu = exchange_chemical_potentials(
-            phi_a, chis_full
-        ) - exchange_chemical_potentials(phi_b, chis_full)
+        delta_mu = exchange_chemical_potentials(phi_a, chis_full) - exchange_chemical_potentials(
+            phi_b, chis_full
+        )
         assert np.allclose(residual[:2], delta_mu)
-
-    @pytest.mark.parametrize("shape", [(3,), (1, 4), ()])
-    def test_rejects_invalid_phi_shape(self, chis_full, shape):
-        with pytest.raises(ValueError, match="leading axis of length 2"):
-            exchange_chemical_potentials(np.full(shape, 0.2), chis_full)
 
     def test_rejects_invalid_chis_shape(self):
         with pytest.raises(ValueError, match="2x2 or a 3x3"):

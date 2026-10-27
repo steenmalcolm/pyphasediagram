@@ -76,7 +76,7 @@ classDiagram
         +Binodal binodal (after build)
         +__init__(chis)
         -_free_energy(phi) ndarray
-        +build(delta=1e-3) None
+        +build() None
         +get_compositions(phi_m) ndarray
         +plot_phase_counts(ax=None)
         +plot(ax=None)
@@ -92,9 +92,10 @@ classDiagram
         +list~Polygon~ polygons
         +__init__(chis)
         +build(num_points=10000)
-        -_get_p_q(phi, is_calculate_phi2=True)
+        -_get_quadratic_coefficients(phi, is_calculate_phi2=True)
+        -_polynomial_degree_masks(quadratic, linear, constant)
         +get_spinodal_coords()
-        +phi2_from_phi1(phi1)
+        -_phi2_from_phi1(phi1)
         +eigenvalues_from_phi(phi1, phi2)
         -_domain_data(phi1_i, phi1_f, num_points=5000)
         -_spinodal_domains()
@@ -281,4 +282,3 @@ flowchart TD
   `stepper/flory_stepper.py` supplies the Flory-Huggins residual and initialization.
 - `point.py` provides the small point and initialization objects shared by the
   spinodal and binodal calculations.
-

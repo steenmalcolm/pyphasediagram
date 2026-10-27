@@ -4,8 +4,6 @@ import pytest
 
 from pyphasediagram.stepper.flory_stepper import Stepper
 
-# TODO: unit test where _projection_loop WILL fail
-
 
 @pytest.fixture(scope="module")
 def chis():
@@ -113,6 +111,38 @@ def test_binary_init_returns_valid_initial_point(stepper, which_comp, expected_v
     # Should be on/very near the manifold after projection in binary_init
     r = np.asarray(stepper._residual_jit(jnp.asarray(phi_init)))
     assert np.linalg.norm(r) < 1e-7
+
+
+@pytest.mark.parametrize("which_comp", [-1, 3])
+def test_binary_init_rejects_invalid_component(stepper, which_comp):
+    with pytest.raises(ValueError, match="which_comp must be 0, 1, or 2"):
+        stepper.binary_init(which_comp)
+
+
+@pytest.mark.parametrize("which_comp", [0, 1, 2])
+def test_binary_init_returns_none_for_weak_interaction(which_comp):
+    weak_stepper = Stepper(np.zeros((2, 2)))
+
+    assert weak_stepper.binary_init(which_comp) == (None, None)
+
+
+def test_binary_init_raises_when_projection_does_not_converge(stepper, monkeypatch):
+    residual = jnp.ones(3)
+    monkeypatch.setattr(stepper, "_BINARY_INIT_MAX_ITERATIONS", 2)
+    monkeypatch.setattr(stepper, "binary_state", lambda chi: 0.1)
+    monkeypatch.setattr(stepper, "_residual_jit", lambda phi: residual)
+    monkeypatch.setattr(
+        stepper,
+        "_projection",
+        lambda phi: (jnp.zeros_like(phi), residual, jnp.asarray(0.0)),
+    )
+    monkeypatch.setattr(stepper, "is_terminate", lambda phi: jnp.asarray(False))
+
+    with pytest.raises(
+        RuntimeError,
+        match=r"did not converge after 2 iterations for which_comp=0",
+    ):
+        stepper.binary_init(0)
 
 
 def test_run_executes_from_binary_init(stepper):

@@ -10,8 +10,8 @@ import numpy as np
 from numpy.typing import ArrayLike
 
 
-def reduce_chis(chis: ArrayLike) -> np.ndarray:
-    r"""Convert a full interaction matrix to the reduced ``(2, 2)`` form.
+def reduce_chis(chis: ArrayLike, ncomp: int = 3) -> np.ndarray:
+    r"""Convert a full interaction matrix of `ncomp` components to the reduced `ncomp-1` form.
 
     Parameters
     ----------
@@ -24,13 +24,13 @@ def reduce_chis(chis: ArrayLike) -> np.ndarray:
     Returns
     -------
     numpy.ndarray
-        Reduced interaction matrix :math:`\chi` with shape ``(2, 2)`` acting on
+        Reduced interaction matrix :math:`\chi` acting on
         the independent compositions :math:`(\phi_1, \phi_2)`:
 
         .. math::
 
            \chi = \begin{pmatrix}
-           -2\chi_{01} & \chi_{12} - \chi_{01} - \chi_{02} \\
+           -2\chi_{0i} & \chi_{12} - \chi_{01} - \chi_{02} \\
            \chi_{12} - \chi_{01} - \chi_{02} & -2\chi_{02}
            \end{pmatrix}.
 
@@ -63,14 +63,6 @@ def reduce_chis(chis: ArrayLike) -> np.ndarray:
     return np.array([[-2 * chi_01, off_diagonal], [off_diagonal, -2 * chi_02]])
 
 
-def _as_compositions(phi: ArrayLike) -> np.ndarray:
-    phi = np.asarray(phi, dtype=float)
-    if phi.ndim == 0 or phi.shape[0] != 2:
-        msg = f"phi must have a leading axis of length 2, but got shape {phi.shape}"
-        raise ValueError(msg)
-    return phi
-
-
 def free_energy(phi: ArrayLike, chis: ArrayLike) -> np.ndarray:
     r"""Calculate the Flory--Huggins free-energy density of mixing.
 
@@ -93,8 +85,7 @@ def free_energy(phi: ArrayLike, chis: ArrayLike) -> np.ndarray:
     Raises
     ------
     ValueError
-        If ``chis`` does not have shape ``(3, 3)`` or ``(2, 2)``, or the
-        first axis of ``phi`` does not have length 2.
+        If ``chis`` does not have shape ``(3, 3)`` or ``(2, 2)``.
 
     Notes
     -----
@@ -106,7 +97,7 @@ def free_energy(phi: ArrayLike, chis: ArrayLike) -> np.ndarray:
        f(\boldsymbol{\phi}) = \sum_{i=0}^{2}\phi_i\ln\phi_i
        + \tfrac{1}{2}\boldsymbol{\phi}^{\mathsf{T}} C\boldsymbol{\phi}.
     """
-    phi = _as_compositions(phi)
+    phi = np.asarray(phi, dtype=float)
     reduced_chis = reduce_chis(chis)
     phi_0 = 1.0 - phi.sum(axis=0)
     return (
@@ -139,8 +130,7 @@ def exchange_chemical_potentials(phi: ArrayLike, chis: ArrayLike) -> np.ndarray:
     Raises
     ------
     ValueError
-        If ``chis`` does not have shape ``(3, 3)`` or ``(2, 2)``, or the
-        first axis of ``phi`` does not have length 2.
+        If ``chis`` does not have shape ``(3, 3)`` or ``(2, 2)``.
 
     Notes
     -----
@@ -156,7 +146,7 @@ def exchange_chemical_potentials(phi: ArrayLike, chis: ArrayLike) -> np.ndarray:
     :math:`f = \sum_{i=0}^{2}\phi_i\ln\phi_i
     + \tfrac{1}{2}\boldsymbol{\phi}^{\mathsf{T}} C\boldsymbol{\phi}`.
     """
-    phi = _as_compositions(phi)
+    phi = np.asarray(phi, dtype=float)
     reduced_chis = reduce_chis(chis)
     phi_0 = 1.0 - phi.sum(axis=0)
     return np.log(phi) - np.log(phi_0) + reduced_chis @ phi

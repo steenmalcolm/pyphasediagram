@@ -46,6 +46,8 @@ class Stepper(BaseStepper):
        \phi_0^{(\alpha)} = 1 - \phi_1^{(\alpha)} - \phi_2^{(\alpha)}.
     """
 
+    _BINARY_INIT_MAX_ITERATIONS = 10_000
+
     def __init__(self, chis: ArrayLike) -> None:
         self.chis = jnp.asarray(chis)  # (2,2)
         super().__init__()
@@ -184,9 +186,7 @@ class Stepper(BaseStepper):
             raise ValueError(msg)
         return float(sol.x.item())
 
-    def binary_init(
-        self, which_comp: int = 0
-    ) -> tuple[np.ndarray | None, np.ndarray | None]:
+    def binary_init(self, which_comp: int = 0) -> tuple[np.ndarray | None, np.ndarray | None]:
         r"""Construct an initial state near a binary limit.
 
         Parameters
@@ -209,30 +209,35 @@ class Stepper(BaseStepper):
         -------
         phi_init : numpy.ndarray or None
             Initial phase compositions with shape ``(4,)`` and ordering
-            ``[phi1_a, phi2_a, phi1_b, phi2_b]``. ``None`` indicates that an
-            initial state could not be constructed.
+            ``[phi1_a, phi2_a, phi1_b, phi2_b]``. ``None`` is returned when
+            the selected effective binary interaction is at most 2.
         v_init : numpy.ndarray or None
             Initial tracing direction with shape ``(4,)`` and the same
             coordinate ordering. ``None`` is returned together with a missing
             initial state.
 
+        Raises
+        ------
+        ValueError
+            If ``which_comp`` is not 0, 1, or 2, or if the root
+            solver does not converge.
+        RuntimeError
+            If projection onto the coexistence manifold does not converge
+            within 10,000 iterations.
+
         Notes
         -----
         ``(None, None)`` is returned when the selected effective interaction
-        is at most 2, when ``which_comp`` is outside ``{0, 1, 2}``, or when
-        projection has not converged after :math:`10\,000` iterations.
-        Otherwise, the initial composition is projected until
+        is at most 2. Otherwise, the initial composition is projected until
         :math:`\lVert\boldsymbol{r}\rVert_2 \leq 10^{-8}`. Candidate updates
         are shortened to remain inside the valid composition domain.
         """
 
-        phi_init: np.ndarray = None
-        v_init: np.ndarray = None
-        phi_bin: float = None
+        if which_comp not in (0, 1, 2):
+            msg = f"which_comp must be 0, 1, or 2; got {which_comp!r}"
+            raise ValueError(msg)
 
-        if (
-            which_comp == 0
-        ):  # Phase separation between components 1 and 2, component 0 is dilute
+        if which_comp == 0:  # Phase separation between components 1 and 2, component 0 is dilute
             chi = self.chis[0, 1] - 0.5 * (self.chis[0, 0] + self.chis[1, 1])
             if chi <= 2:
                 return None, None
@@ -262,32 +267,33 @@ class Stepper(BaseStepper):
             phi_init[3] = 1 - phi_init[2] - phi_init[3]
             v_init = np.array([0, 1, 0, 1])
 
-        # No phase separation in this binary limit, return None to indicate failure to
-        # initialize
-        if phi_bin is None:
-            return None, None
-
         # Keep initialization in NumPy/Python; convert to JAX arrays at the end
         res = np.asarray(self._residual_jit(jnp.asarray(phi_init)))
-        max_iter = 10000
+        residual_norm = float(np.linalg.norm(res))
+        tolerance = 1e-8
+        max_iter = self._BINARY_INIT_MAX_ITERATIONS
         iteration = 0
 
-        while np.linalg.norm(res) > 1e-8:
-            alpha = 1.0 if np.linalg.norm(res) < 1.0 else 0.1
-            v, res_jax, _ = self._projection(jnp.asarray(phi_init))
+        while residual_norm > tolerance and iteration < max_iter:
+            alpha = 1.0 if residual_norm < 1.0 else 0.1
+            v, _, _ = self._projection(jnp.asarray(phi_init))
             v = np.asarray(v)
-            res = np.asarray(res_jax)
             # Use JAX-compatible termination check (works both in and out of jit)
             while bool(self.is_terminate(jnp.asarray(phi_init + v * alpha))):
                 alpha *= 0.5
             phi_init += v * alpha
-
-            if iteration > max_iter:
-                # TODO: remove this stamement
-                return None, None
-                msg = "In binary_init: Projection not converging"
-                raise RuntimeError(msg)
             iteration += 1
+
+            res = np.asarray(self._residual_jit(jnp.asarray(phi_init)))
+            residual_norm = float(np.linalg.norm(res))
+
+        if residual_norm > tolerance:
+            msg = (
+                "binary_init projection did not converge after "
+                f"{max_iter} iterations for which_comp={which_comp}; "
+                f"residual norm={residual_norm:.3e}"
+            )
+            raise RuntimeError(msg)
 
         return np.asarray(phi_init), np.asarray(v_init)
 
@@ -317,9 +323,7 @@ if __name__ == "__main__":
             -chis[1, 1] / 2,
             chis[0, 1] - (chis[0, 0] + chis[1, 1]) / 2,
         )
-        chis_3 = np.array(
-            [[0, chi_01, chi_02], [chi_01, 0, chi_12], [chi_02, chi_12, 0]]
-        )
+        chis_3 = np.array([[0, chi_01, chi_02], [chi_01, 0, chi_12], [chi_02, chi_12, 0]])
         if phi_init is not None:
             phi_means = [0, phi_init[::2].mean(), phi_init[1::2].mean()]
         else:
