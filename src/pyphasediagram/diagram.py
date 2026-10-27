@@ -6,7 +6,7 @@ the resulting coexistence curves, critical points, and phase regions on
 ternary axes.
 """
 
-from typing import Iterable, Iterator
+from collections.abc import Iterable, Iterator
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -151,10 +151,11 @@ class PhaseDiagram:
     def __init__(self, chis: np.ndarray) -> None:
         chis = np.asarray(chis, dtype=float)
         if chis.shape != (3, 3):
-            raise ValueError(
+            msg = (
                 f"PhaseDiagram requires a 3x3 interaction matrix, got shape "
                 f"{chis.shape}"
             )
+            raise ValueError(msg)
         self.chis = reduce_chis(chis)
 
     def build(self) -> None:
@@ -195,7 +196,6 @@ class PhaseDiagram:
         The return annotation describes the intended API; the current
         implementation returns ``None``.
         """
-        pass
 
     def plot_phase_counts(self) -> tuple[Figure, TernaryAxes]:
         """Plot the one-, two-, and three-phase regions.
@@ -390,7 +390,8 @@ class PhaseDiagram:
         )
         fig.suptitle(
             r"$(\chi_{01}, \chi_{02}, \chi_{12}) = "
-            + f"({-self.chis[0, 0]/2:.4f}, {-self.chis[1, 1]/2:.4f}, {self.chis[0, 1]-self.chis[0, 0]/2-self.chis[1, 1]/2:.4f})$"
+            f"({-self.chis[0, 0] / 2:.4f}, {-self.chis[1, 1] / 2:.4f}, "
+            f"{self.chis[0, 1] - self.chis[0, 0] / 2 - self.chis[1, 1] / 2:.4f})$"
         )
         self._draw_phase_diagram(ax1)
         self._draw_phase_counts(ax2)
@@ -403,11 +404,8 @@ if __name__ == "__main__":
 
     from tqdm import tqdm
 
-    class TimeoutError(Exception):
-        pass
-
     def _timeout_handler(signum, frame):
-        raise TimeoutError()
+        raise TimeoutError
 
     i = 0
     pbar = tqdm(total=100)
@@ -431,7 +429,7 @@ if __name__ == "__main__":
         if len(diagram.binodal.binodal_sections) == 0:
             continue
         diagram.plot_summary()
-        plt.savefig(f"delete/{i+200}.png")
+        plt.savefig(f"delete/{i + 200}.png")
         plt.close()
         pbar.update(1)
         i += 1

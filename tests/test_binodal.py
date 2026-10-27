@@ -44,7 +44,6 @@ def _crossing_sections():
 # BinodalSection tests
 # ---------------------------------------------------------------------------
 class TestBinodalSection:
-
     def test_init_shapes(self):
         sec = _simple_section()
         assert sec.phis.shape == (2, 2, 50)
@@ -102,7 +101,8 @@ class TestBinodalSection:
         assert sec1.intersects_with(sec2) == []
 
     def test_intersects_with_crossing(self):
-        """Crossing sections should produce intersection points (three-phase candidates)."""
+        """Crossing sections should produce intersection points
+        (three-phase candidates)."""
         sec1, sec2 = _crossing_sections()
         tp_points = sec1.intersects_with(sec2)
         assert len(tp_points) > 0
@@ -121,7 +121,6 @@ class TestBinodalSection:
 # Binodal (unit-level) tests
 # ---------------------------------------------------------------------------
 class TestBinodalUnit:
-
     @pytest.fixture
     def chis(self):
         return np.array([[-5.0, 0.5], [0.5, -5.5]])
@@ -233,7 +232,8 @@ class TestBinodalUnit:
                 )
 
     def test_remove_unstable_sections_splits_into_two(self, chis):
-        """An unstable manifold cutting through the middle should split a section into two."""
+        """An unstable manifold cutting through the middle should split a section into
+        two."""
         b = Binodal(chis)
         t = np.linspace(0, 1, 100)
         phi_a = np.stack([0.1 + 0.8 * t, 0.05 * np.ones_like(t)], axis=0)
@@ -275,9 +275,9 @@ class TestBinodalUnit:
                 pa = shapely.Point(sec.phis[0, :, end_idx])
                 pb = shapely.Point(sec.phis[1, :, end_idx])
                 dists.append(min(boundary.distance(pa), boundary.distance(pb)))
-            assert (
-                min(dists) < 2 * step
-            ), f"No endpoint close to manifold boundary: dists={dists}"
+            assert min(dists) < 2 * step, (
+                f"No endpoint close to manifold boundary: dists={dists}"
+            )
 
     def test_duplicate_three_phase_polygons_filtered(self, chis):
         """Near-duplicate three-phase polygons should be deduplicated."""
@@ -347,9 +347,9 @@ class TestBinodalEndToEnd:
                 phi2 = sec.phis[phase, 1]
                 assert np.all(phi1 >= -1e-10), f"phi1 negative: {phi1.min()}"
                 assert np.all(phi2 >= -1e-10), f"phi2 negative: {phi2.min()}"
-                assert np.all(
-                    phi1 + phi2 <= 1 + 1e-10
-                ), f"phi1+phi2 > 1: {(phi1+phi2).max()}"
+                assert np.all(phi1 + phi2 <= 1 + 1e-10), (
+                    f"phi1+phi2 > 1: {(phi1 + phi2).max()}"
+                )
 
     def test_phase_polygons_populated(self, symmetric_binodal):
         assert symmetric_binodal.three_phase_polygons is not None

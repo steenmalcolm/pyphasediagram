@@ -60,7 +60,7 @@ class _Timeout(Exception):
 
 
 def _timeout_handler(signum, frame):
-    raise _Timeout()
+    raise _Timeout
 
 
 def _set_alarm(seconds: int):
@@ -487,42 +487,42 @@ def main():
     # Collect failures where flory found a lower energy
     flory_wins = []
     for r in results:
-        for s in r["two_phase"]["samples"]:
-            if not s["pass"] and s.get("delta_f") is not None and s["delta_f"] > 0:
-                flory_wins.append(
-                    {
-                        "type": "two_phase",
-                        "diagram_idx": r["idx"],
-                        "chis_reduced": r["chis_reduced"],
-                        "phi_mean": s["phi_mean"],
-                        "binodal_phi_a": s["phi_a"],
-                        "binodal_phi_b": s["phi_b"],
-                        "flory_n_phases": s["flory_n_phases"],
-                        "flory_phis": s["flory_phis"],
-                        "flory_volumes": s["flory_volumes"],
-                        "f_binodal": s["f_binodal"],
-                        "f_flory": s["f_flory"],
-                        "delta_f": s["delta_f"],
-                    }
-                )
-        for s in r["three_phase"]["samples"]:
-            if not s["pass"] and s.get("delta_f") is not None and s["delta_f"] > 0:
-                flory_wins.append(
-                    {
-                        "type": "three_phase",
-                        "diagram_idx": r["idx"],
-                        "chis_reduced": r["chis_reduced"],
-                        "phi_mean": s["phi_mean"],
-                        "binodal_phis": s["binodal_phis"],
-                        "binodal_volumes": s["binodal_volumes"],
-                        "flory_n_phases": s["flory_n_phases"],
-                        "flory_phis": s["flory_phis"],
-                        "flory_volumes": s["flory_volumes"],
-                        "f_binodal": s["f_binodal"],
-                        "f_flory": s["f_flory"],
-                        "delta_f": s["delta_f"],
-                    }
-                )
+        flory_wins.extend(
+            {
+                "type": "two_phase",
+                "diagram_idx": r["idx"],
+                "chis_reduced": r["chis_reduced"],
+                "phi_mean": s["phi_mean"],
+                "binodal_phi_a": s["phi_a"],
+                "binodal_phi_b": s["phi_b"],
+                "flory_n_phases": s["flory_n_phases"],
+                "flory_phis": s["flory_phis"],
+                "flory_volumes": s["flory_volumes"],
+                "f_binodal": s["f_binodal"],
+                "f_flory": s["f_flory"],
+                "delta_f": s["delta_f"],
+            }
+            for s in r["two_phase"]["samples"]
+            if not s["pass"] and s.get("delta_f") is not None and s["delta_f"] > 0
+        )
+        flory_wins.extend(
+            {
+                "type": "three_phase",
+                "diagram_idx": r["idx"],
+                "chis_reduced": r["chis_reduced"],
+                "phi_mean": s["phi_mean"],
+                "binodal_phis": s["binodal_phis"],
+                "binodal_volumes": s["binodal_volumes"],
+                "flory_n_phases": s["flory_n_phases"],
+                "flory_phis": s["flory_phis"],
+                "flory_volumes": s["flory_volumes"],
+                "f_binodal": s["f_binodal"],
+                "f_flory": s["f_flory"],
+                "delta_f": s["delta_f"],
+            }
+            for s in r["three_phase"]["samples"]
+            if not s["pass"] and s.get("delta_f") is not None and s["delta_f"] > 0
+        )
 
     failures_path = out_path.with_name(out_path.stem + "_flory_wins.json")
     failures_path.write_text(json.dumps(flory_wins, indent=2))
@@ -609,8 +609,8 @@ def analyze_flory_wins(flory_wins: list[dict]):
         elif fw["type"] == "three_phase":
             binodal_phis = np.array(fw["binodal_phis"])
             # Binodal three-phase triangle
-            tri_x = list(binodal_phis[:, 0]) + [binodal_phis[0, 0]]
-            tri_y = list(binodal_phis[:, 1]) + [binodal_phis[0, 1]]
+            tri_x = [*list(binodal_phis[:, 0]), binodal_phis[0, 0]]
+            tri_y = [*list(binodal_phis[:, 1]), binodal_phis[0, 1]]
             ax.plot(
                 tri_x, tri_y, "g-o", markersize=6, linewidth=2, label="Binodal 3-phase"
             )
@@ -638,9 +638,7 @@ def analyze_flory_wins(flory_wins: list[dict]):
         )
 
         delta_f = fw["delta_f"]
-        ax.set_title(
-            f"Flory-win #{i+1} ({fw['type']})\n" rf"$\Delta f = {delta_f:.2e}$"
-        )
+        ax.set_title(rf"Flory-win #{i + 1} ({fw['type']})\n$\Delta f = {delta_f:.2e}$")
         ax.legend(fontsize=8)
         plt.tight_layout()
         plt.show()

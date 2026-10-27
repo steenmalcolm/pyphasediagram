@@ -13,7 +13,7 @@ except ImportError:
         __version__ = "unknown"
     del PackageNotFoundError, version  # clean name space
 
-from pyphasediagram.diagram import PhaseDiagram
+from pyphasediagram.diagram import PhaseDiagram  # noqa: F401
 
 # from pyphasediagram.stepper import TernaryStepper
 # from pyphasediagram.stepper import BaseStepper

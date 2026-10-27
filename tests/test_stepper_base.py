@@ -1,4 +1,3 @@
-import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
@@ -17,14 +16,15 @@ def chis():
 @pytest.fixture(scope="module")
 def phi():
     """
-    A valid composition vector for two phases (ternary mixture represented with 2 independent comps per phase).
+    A valid composition vector for two phases (ternary mixture represented with 2
+    independent comps per phase).
     Shape is (4,) = (phi1_a, phi2_a, phi1_b, phi2_b).
     """
     # Ensure both phases have sum < 1 so phi0_phase = 1 - sum > 0
     return np.array([0.20, 0.30, 0.25, 0.35], dtype=jnp.float64)
 
 
-@pytest.fixture()
+@pytest.fixture
 def v_init():
     """Initial guess for the Newton step."""
     return np.array([1.0, 0.0, 1.0, 0.0], dtype=jnp.float64)
@@ -63,7 +63,7 @@ class DummyStepper(BaseStepper):
         return jnp.logical_or(close, invalid)
 
 
-@pytest.fixture()
+@pytest.fixture
 def stepper(chis):
     return DummyStepper(chis)
 
@@ -123,7 +123,8 @@ def test_projection_loop_converges_or_flags(stepper, phi):
     """
     Projection refinement should either converge or set the failed flag.
     """
-    # _projection_loop is a helper used inside jit loop; it must be callable in eager too.
+    # _projection_loop is a helper used inside jit loop; it must be callable in eager,
+    # too.
     phi_f, res_f, sv_f, failed = stepper._projection_loop(phi)
 
     assert phi_f.shape == (4,)
@@ -138,12 +139,13 @@ def test_projection_loop_converges_or_flags(stepper, phi):
 
 def test_run_executes_and_returns_shapes(stepper, phi):
     """
-    End-to-end sanity test: run should return phis with shape (2, 2, K) and sv list length K.
+    End-to-end sanity test: run should return phis with shape (2, 2, K) and sv list
+    length K.
     """
     # Use a float v_init to avoid dtype issues in lax.select
     v_init = jnp.array([1.0, 0.0, 1.0, 0.0], dtype=phi.dtype)
 
-    phis, svs, flags = stepper.run(phi, np.asarray(v_init), delta_0=2e-4, delta_1=1e-3)
+    phis, svs, _flags = stepper.run(phi, np.asarray(v_init), delta_0=2e-4, delta_1=1e-3)
 
     assert isinstance(phis, np.ndarray)
     assert isinstance(svs, np.ndarray)
@@ -162,7 +164,7 @@ def test_run_points_are_valid_compositions(stepper, phi):
     - sum of independent comps per phase <= 1
     """
     v_init = jnp.array([1.0, 0.0, 1.0, 0.0], dtype=phi.dtype)
-    phis, svs, flags = stepper.run(phi, v_init, delta_0=2e-4, delta_1=1e-3)
+    phis, _svs, _flags = stepper.run(phi, v_init, delta_0=2e-4, delta_1=1e-3)
 
     # phis is (2 phases, 2 comps, K)
     assert np.all(np.isfinite(phis))
@@ -238,7 +240,6 @@ def test_run_sets_max_steps_flag(phi, v_init):
 
 def test_run_sets_cycled_flag(phi, v_init):
     class CycledStepper(FlagStepperBase):
-
         CYCLE_MIN_STEPS = 3  # Decrease to trigger cycle faster
         CYCLE_INIT_TOL = 1e-12  # require exact return
 
@@ -279,7 +280,7 @@ def test_run_sets_projection_fail_flag(phi, v_init):
             return phi_f, res_f, sv_f, failed
 
     stepper = ProjectionFailStepper()
-    phis, _, flags = stepper.run(phi, v_init, delta_0=1e-3, delta_1=1e-3)
+    _phis, _, flags = stepper.run(phi, v_init, delta_0=1e-3, delta_1=1e-3)
 
     assert "PROJECTION_FAIL" in flags
 
@@ -314,7 +315,8 @@ def test_run_sets_angle_fail_flag(phi, v_init):
         def _projection_loop(self, phi):
             # We want:
             # - step 0 (trace start): move along e0
-            # - step 1: move along e1 (orthogonal to previous step direction) -> ANGLE_FAIL
+            # - step 1: move along e1 (orthogonal to previous step direction)
+            #       -> ANGLE_FAIL
             #
             # We can distinguish the first call by checking whether we're still at phi0.
             dist = jnp.linalg.norm(phi - self._phi0)
@@ -337,6 +339,6 @@ def test_run_sets_angle_fail_flag(phi, v_init):
             return phi[1] > self._phi0[1]
 
     stepper = AngleFailStepper(phi)
-    phis, _, flags = stepper.run(phi, v_init, delta_0=1e-3, delta_1=1e-3)
+    _phis, _, flags = stepper.run(phi, v_init, delta_0=1e-3, delta_1=1e-3)
 
     assert "ANGLE_FAIL" in flags

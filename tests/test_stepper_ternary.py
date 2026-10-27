@@ -1,6 +1,6 @@
+import jax.numpy as jnp
 import numpy as np
 import pytest
-import jax.numpy as jnp
 
 from pyphasediagram.stepper.flory_stepper import Stepper
 
@@ -18,14 +18,15 @@ def chis():
 @pytest.fixture(scope="module")
 def phi():
     """
-    A valid composition vector for two phases (ternary mixture represented with 2 independent comps per phase).
+    A valid composition vector for two phases (ternary mixture represented with 2
+    independent comps per phase).
     Shape is (4,) = (phi1_a, phi2_a, phi1_b, phi2_b).
     """
     # Ensure both phases have sum < 1 so phi0_phase = 1 - sum > 0
     return jnp.array([0.20, 0.30, 0.25, 0.35], dtype=jnp.float64)
 
 
-@pytest.fixture()
+@pytest.fixture
 def stepper(chis):
     obj = Stepper(chis)
     # keep tests fast
@@ -79,7 +80,7 @@ def test_binary_state_solves_equation_for_large_chi(stepper):
 
 
 @pytest.mark.parametrize(
-    "which_comp, expected_v_init",
+    ("which_comp", "expected_v_init"),
     [
         (0, np.array([-1, -1, -1, -1])),
         (1, np.array([1, 0, 1, 0])),
@@ -117,9 +118,10 @@ def test_binary_init_returns_valid_initial_point(stepper, which_comp, expected_v
 def test_run_executes_from_binary_init(stepper):
     # Use a binary_init that should exist for the chis fixture
     phi_init, v_init = stepper.binary_init(0)
-    assert phi_init is not None and v_init is not None
+    assert phi_init is not None
+    assert v_init is not None
 
-    phis, svs, flags = stepper.run(
+    phis, svs, _flags = stepper.run(
         np.asarray(phi_init), np.asarray(v_init), delta_0=2e-4, delta_1=1e-3
     )
 
@@ -146,7 +148,7 @@ def test_run_points_are_near_manifold(stepper):
     Keep it light: only check first few points.
     """
     phi_init, v_init = stepper.binary_init(0)
-    phis, _, flags = stepper.run(
+    phis, _, _flags = stepper.run(
         np.asarray(phi_init), np.asarray(v_init), delta_0=2e-4, delta_1=1e-3
     )
 

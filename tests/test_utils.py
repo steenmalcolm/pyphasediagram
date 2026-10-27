@@ -24,7 +24,6 @@ def chis_reduced(chis_full):
 # reduce_chis
 # ---------------------------------------------------------------------------
 class TestReduceChis:
-
     def test_known_values(self, chis_full):
         expected = np.array([[-5.4, -2.5], [-2.5, -5.8]])
         assert np.allclose(reduce_chis(chis_full), expected)
@@ -59,7 +58,6 @@ class TestReduceChis:
 # free_energy
 # ---------------------------------------------------------------------------
 class TestFreeEnergy:
-
     def test_ideal_mixture_value(self):
         """With zero interactions, f is the ideal entropy of mixing."""
         phi = np.array([0.2, 0.3])
@@ -118,7 +116,6 @@ class TestFreeEnergy:
 # exchange_chemical_potentials
 # ---------------------------------------------------------------------------
 class TestExchangeChemicalPotentials:
-
     def test_ideal_mixture_value(self):
         phi = np.array([0.2, 0.3])
         mu = exchange_chemical_potentials(phi, np.zeros((3, 3)))
@@ -150,7 +147,8 @@ class TestExchangeChemicalPotentials:
             )
 
     def test_matches_stepper_residual(self, chis_full):
-        """The difference between two phases equals the stepper's chemical-potential residual."""
+        """The difference between two phases equals the stepper's chemical-potential
+        residual."""
         phi_a = np.array([0.1, 0.2])
         phi_b = np.array([0.3, 0.4])
         stepper = Stepper(reduce_chis(chis_full))
