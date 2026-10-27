@@ -11,56 +11,93 @@ from numpy.typing import ArrayLike
 
 
 def reduce_chis(chis: ArrayLike, ncomp: int = 3) -> np.ndarray:
-    r"""Convert a full interaction matrix of `ncomp` components to the reduced `ncomp-1` form.
+    r"""Convert a full Flory--Huggins interaction matrix to reduced form.
+
+    The concentration of species 0 is eliminated using incompressibility,
+    leaving ``ncomp - 1`` independent concentrations.
 
     Parameters
     ----------
     chis : array-like
-        Symmetric Flory--Huggins interaction matrix with shape ``(3, 3)``.
-        Only the off-diagonal entries :math:`\chi_{01}`, :math:`\chi_{02}`,
-        and :math:`\chi_{12}` are used. A matrix that is already reduced,
-        with shape ``(2, 2)``, is returned unchanged.
+        Symmetric Flory--Huggins interaction matrix with shape
+        ``(ncomp, ncomp)``. Only off-diagonal entries are used.
+        A matrix that is already reduced, with shape
+        ``(ncomp - 1, ncomp - 1)``, is returned unchanged.
+    ncomp : int, optional
+        Total number of components, including the eliminated species 0.
+        Defaults to 3.
 
     Returns
     -------
     numpy.ndarray
-        Reduced interaction matrix :math:`\chi` acting on
-        the independent compositions :math:`(\phi_1, \phi_2)`:
+        Reduced interaction matrix with shape
+        ``(ncomp - 1, ncomp - 1)``, acting on the independent
+        compositions :math:`(\phi_1, \ldots, \phi_{N-1})`.
+
+        Its elements are given by
 
         .. math::
 
-           \chi = \begin{pmatrix}
-           -2\chi_{0i} & \chi_{12} - \chi_{01} - \chi_{02} \\
-           \chi_{12} - \chi_{01} - \chi_{02} & -2\chi_{02}
-           \end{pmatrix}.
+            \tilde{\chi}_{ij}
+            = \chi_{ij} - \chi_{0i} - \chi_{0j},
+
+        for :math:`i,j \in \{1,\ldots,N-1\}`, with
+        :math:`\chi_{ii}=0`.
 
     Raises
     ------
     ValueError
-        If ``chis`` does not have shape ``(3, 3)`` or ``(2, 2)``.
+        If ``ncomp`` is smaller than 2 or ``chis`` does not have
+        shape ``(ncomp, ncomp)`` or ``(ncomp - 1, ncomp - 1)``.
 
     Notes
     -----
-    The Flory--Huggins parameter of the full interaction matrix appear in the
-    free-energy density as
+    The full Flory--Huggins interaction free-energy density is
 
     .. math::
-        f(\phi_0, \phi_1, \phi_2) =
-            \phi_0 \ln \phi_0 + \phi_1 \ln \phi_1 + \phi_2 \ln \phi_2
-            + \phi_0 \chi_{01} \phi_1
-            + \phi_0 \chi_{02} \phi_2
-            + \phi_1 \chi_{12} \phi_2
+
+        f_{\mathrm{int}}
+        = \sum_{0 \leq i < j < N} \chi_{ij} \phi_i \phi_j.
+
+    Eliminating species 0 through the incompressibility constraint
+
+    .. math::
+
+        \phi_0 = 1 - \sum_{i=1}^{N-1} \phi_i
+
+    gives, up to terms linear in the independent concentrations,
+
+    .. math::
+
+        f_{\mathrm{int}}
+        = \frac{1}{2}
+          \sum_{i,j=1}^{N-1}
+          \tilde{\chi}_{ij} \phi_i \phi_j
+          + \text{linear terms}.
     """
-    chis = np.asarray(chis, dtype=float)
-    if chis.shape == (2, 2):
-        return chis
-    if chis.shape != (3, 3):
-        msg = f"chis must be a 2x2 or a 3x3 array, but got {chis.shape}"
+    if ncomp < 2:
+        msg = "ncomp must be at least 2"
         raise ValueError(msg)
 
-    chi_01, chi_02, chi_12 = chis[0, 1], chis[0, 2], chis[1, 2]
-    off_diagonal = chi_12 - chi_01 - chi_02
-    return np.array([[-2 * chi_01, off_diagonal], [off_diagonal, -2 * chi_02]])
+    chis = np.asarray(chis, dtype=float)
+
+    if chis.shape == (ncomp - 1, ncomp - 1):
+        return chis
+
+    if chis.shape != (ncomp, ncomp):
+        msg = (
+            f"chis must have shape ({ncomp}, {ncomp}) or "
+            f"({ncomp - 1}, {ncomp - 1}), but got {chis.shape}"
+        )
+        raise ValueError(msg)
+
+    chi_0 = chis[0, 1:]
+    reduced = chis[1:, 1:] - chi_0[:, None] - chi_0[None, :]
+
+    # Ignore the diagonal entries of the original interaction matrix.
+    np.fill_diagonal(reduced, -2 * chi_0)
+
+    return reduced
 
 
 def free_energy(phi: ArrayLike, chis: ArrayLike) -> np.ndarray:

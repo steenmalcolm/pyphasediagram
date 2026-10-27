@@ -48,10 +48,61 @@ class TestReduceChis:
     def test_accepts_nested_lists(self, chis_full):
         assert np.allclose(reduce_chis(chis_full.tolist()), reduce_chis(chis_full))
 
+    def test_four_component_known_values(self):
+        chis = np.array(
+            [
+                [0.0, 1.0, 2.0, 3.0],
+                [1.0, 0.0, 4.0, 5.0],
+                [2.0, 4.0, 0.0, 6.0],
+                [3.0, 5.0, 6.0, 0.0],
+            ]
+        )
+        expected = np.array(
+            [
+                [-2.0, 1.0, 1.0],
+                [1.0, -4.0, 1.0],
+                [1.0, 1.0, -6.0],
+            ]
+        )
+
+        assert np.allclose(reduce_chis(chis, ncomp=4), expected)
+
+    def test_four_component_reduced_input_returned_unchanged(self):
+        chis_reduced = np.array(
+            [
+                [-2.0, 1.0, 1.0],
+                [1.0, -4.0, 1.0],
+                [1.0, 1.0, -6.0],
+            ]
+        )
+
+        assert np.allclose(reduce_chis(chis_reduced, ncomp=4), chis_reduced)
+
+    @pytest.mark.parametrize("ncomp", [0, 1])
+    def test_rejects_fewer_than_two_components(self, ncomp):
+        with pytest.raises(ValueError, match="ncomp must be at least 2"):
+            reduce_chis(np.zeros((1, 1)), ncomp=ncomp)
+
     @pytest.mark.parametrize("shape", [(4, 4), (3, 2), (2, 3), (3,), (9,)])
     def test_rejects_invalid_shape(self, shape):
-        with pytest.raises(ValueError, match="2x2 or a 3x3"):
+        with pytest.raises(ValueError, match="must have shape"):
             reduce_chis(np.zeros(shape))
+
+    def test_rejects_shape_inconsistent_with_ncomp(self):
+        with pytest.raises(ValueError, match="must have shape"):
+            reduce_chis(np.zeros((2, 2)), ncomp=4)
+
+    def test_two_component_limit(self):
+        chis = np.array(
+            [
+                [0.0, 3.0],
+                [3.0, 0.0],
+            ]
+        )
+
+        expected = np.array([[-6.0]])
+
+        np.testing.assert_allclose(reduce_chis(chis, ncomp=2), expected)
 
 
 # ---------------------------------------------------------------------------
@@ -98,7 +149,7 @@ class TestFreeEnergy:
         assert np.allclose(grad, exchange_chemical_potentials(phi, chis_full), atol=1e-6)
 
     def test_rejects_invalid_chis_shape(self):
-        with pytest.raises(ValueError, match="2x2 or a 3x3"):
+        with pytest.raises(ValueError, match="must have shape"):
             free_energy([0.2, 0.3], np.zeros((4, 4)))
 
 
@@ -147,5 +198,5 @@ class TestExchangeChemicalPotentials:
         assert np.allclose(residual[:2], delta_mu)
 
     def test_rejects_invalid_chis_shape(self):
-        with pytest.raises(ValueError, match="2x2 or a 3x3"):
+        with pytest.raises(ValueError, match="must have shape"):
             exchange_chemical_potentials([0.2, 0.3], np.zeros((4, 4)))
