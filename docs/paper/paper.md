@@ -10,16 +10,16 @@ authors:
     orcid: xxx
     affiliation: "1,2"
   - name: Stefan Köstler
-    orcid: xxx
+    orcid: 0009-0005-3449-1383
     affiliation: "1,2"
   - name: David Zwicker
-    orcid: xxx
+    orcid: 0000-0002-3909-3334
     affiliation: 1
 affiliations:
   - index: 1
-    name: 
+    name: Max Planck Institute for Dynamics and Self-Organization, Am Faßberg 17, 37077 Göttingen, Germany
   - index: 2
-    name: 
+    name: Institute for Theoretical Physics, University of Göttingen, Friedrich-Hund-Platz 1, 37077 Göttingen, Germany
 date: 21 October 2026
 bibliography: paper.bib
 ---
@@ -97,6 +97,11 @@ The exact requirements for this document can be found [here](https://joss.readth
 
 # Research impact statement
 
+- Already used in @Kostler2026
+- Used in various internal projects to generate 3-component phase diagrams
+- We are in exchange with other groups, who want to use the software
+- Basis for future work, e.g., to classify all possible topologies of 3-component mixtures
+
 # AI usage disclosure
 
 # Figures
@@ -109,6 +114,6 @@ Figure sizes can be customized by adding an optional second parameter:
 ![Caption for example figure.](figure.png){ width=20% }
 
 # Acknowledgements
-
+Yicheng Qiang
 
 # References
