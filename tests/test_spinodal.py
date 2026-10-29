@@ -146,9 +146,7 @@ def test_phi2_from_phi1_returns_repeated_quadratic_root_once():
     assert np.isnan(lower)
 
 
-def test_domain_data_skips_nan_samples_without_connecting_across_them(
-    monkeypatch, simple_chis
-):
+def test_domain_data_skips_nan_samples_without_connecting_across_them(monkeypatch, simple_chis):
     spinodal = Spinodal(simple_chis)
     monkeypatch.setattr(
         spinodal,
@@ -163,7 +161,7 @@ def test_domain_data_skips_nan_samples_without_connecting_across_them(
 
     nodes = list(spinodal.spinodal_graph)
     coordinates = [(point.phi1, point.phi2) for point in nodes]
-    assert coordinates == pytest.approx([(0.1, 0.2), (0.3, 0.3), (0.2, 0.4)])
+    np.testing.assert_allclose(coordinates, [(0.1, 0.2), (0.3, 0.3), (0.2, 0.4)])
     assert spinodal.spinodal_graph.number_of_edges() == 0
     assert spinodal.node_id == 3
 
@@ -365,9 +363,7 @@ def test_third_derivative_vectorized_shapes(simple_chis):
 # ----------------------------
 
 
-def test_find_critical_points_appends_point(
-    monkeypatch, simple_chis, trivial_spinodal_graph
-):
+def test_find_critical_points_appends_point(monkeypatch, simple_chis, trivial_spinodal_graph):
     sp = Spinodal(simple_chis)
     sp.spinodal_graph = trivial_spinodal_graph
     sp.critical_points = []
@@ -577,9 +573,7 @@ def test_build_replaces_previous_state(monkeypatch, simple_chis):
     monkeypatch.setattr(spinodal, "_clip_to_domain", lambda: None)
     monkeypatch.setattr(spinodal, "_connect_branches", lambda: None)
     monkeypatch.setattr(spinodal, "_find_critical_points", fake_find_critical_points)
-    monkeypatch.setattr(
-        spinodal, "_build_polygons", lambda: setattr(spinodal, "polygons", [])
-    )
+    monkeypatch.setattr(spinodal, "_build_polygons", lambda: setattr(spinodal, "polygons", []))
 
     spinodal.build(num_points=2)
     first_state = (
@@ -688,9 +682,7 @@ def test_plot_skips_components_containing_nan(monkeypatch, simple_chis):
 
     spinodal.plot()
 
-    assert all(
-        not np.isnan(np.asarray(args[1], dtype=float)).any() for args in plot_calls
-    )
+    assert all(not np.isnan(np.asarray(args[1], dtype=float)).any() for args in plot_calls)
 
 
 # tests/test_spinodal_e2e.py
@@ -781,19 +773,13 @@ def test_e2e_spinodal_invariants_random_chis(seed):
         assert np.isfinite(td_cp)
 
         # Find the two adjacent nodes in phase space
-        distances = [
-            np.sqrt((cp.phi1 - n.phi1) ** 2 + (cp.phi2 - n.phi2) ** 2) for n in nodes
-        ]
+        distances = [np.sqrt((cp.phi1 - n.phi1) ** 2 + (cp.phi2 - n.phi2) ** 2) for n in nodes]
         closest_nodes = sorted(zip(distances, nodes))[:2]
         assert len(closest_nodes) == 2
 
         # Ensure absolute value of the third derivative at the adjacent nodes is larger
-        td_adj_1 = sp._third_derivative(
-            closest_nodes[0][1].phi1, closest_nodes[0][1].phi2
-        )
-        td_adj_2 = sp._third_derivative(
-            closest_nodes[1][1].phi1, closest_nodes[1][1].phi2
-        )
+        td_adj_1 = sp._third_derivative(closest_nodes[0][1].phi1, closest_nodes[0][1].phi2)
+        td_adj_2 = sp._third_derivative(closest_nodes[1][1].phi1, closest_nodes[1][1].phi2)
         assert np.isfinite(td_adj_1)
         assert np.isfinite(td_adj_2)
         assert abs(td_adj_1) > abs(td_cp)
@@ -830,9 +816,7 @@ def test_e2e_spinodal_invariants_random_chis(seed):
     # (This catches cases where cp interpolation is way off.)
     nodes = list(G.nodes())
     for cp in sp.critical_points:
-        dmin = min(
-            np.sqrt((cp.phi1 - n.phi1) ** 2 + (cp.phi2 - n.phi2) ** 2) for n in nodes
-        )
+        dmin = min(np.sqrt((cp.phi1 - n.phi1) ** 2 + (cp.phi2 - n.phi2) ** 2) for n in nodes)
         assert dmin < 0.05  # tune based on resolution
 
     # --- 10) Random points inside locally-stable polygons have both eigenvalues
@@ -848,19 +832,13 @@ def test_e2e_spinodal_invariants_random_chis(seed):
                 px = rng.uniform(minx, maxx)
                 py = rng.uniform(miny, maxy)
                 attempts += 1
-                if poly.contains(
-                    shapely.geometry.Point(px, py)
-                ) and Spinodal._in_domain(px, py):
+                if poly.contains(shapely.geometry.Point(px, py)) and Spinodal._in_domain(px, py):
                     ev1, ev2 = sp.eigenvalues_from_phi(px, py)
                     ev_norm = np.sqrt(ev1**2 + ev2**2)
                     # Allow some slack for numerical issues, but generally should be
                     # positive in stable region.
-                    assert ev1 / ev_norm > -1e-4, (
-                        f"ev1={ev1} not positive at ({px}, {py})"
-                    )
-                    assert ev2 / ev_norm > -1e-4, (
-                        f"ev2={ev2} not positive at ({px}, {py})"
-                    )
+                    assert ev1 / ev_norm > -1e-4, f"ev1={ev1} not positive at ({px}, {py})"
+                    assert ev2 / ev_norm > -1e-4, f"ev2={ev2} not positive at ({px}, {py})"
                     n_samples += 1
 
 
@@ -879,9 +857,7 @@ def test_e2e_spinodal_invariants_symmetric_case(chi):
     import shapely
 
     if chi == 3:
-        pytest.skip(
-            "Skipping chi=3 due to known numerical issues with 2nd order transition"
-        )
+        pytest.skip("Skipping chi=3 due to known numerical issues with 2nd order transition")
 
     chis = np.array([[-2 * chi, -chi], [-chi, -2 * chi]], dtype=float)
     sp = _build_spinodal_or_skip(chis, num_points=1000)
