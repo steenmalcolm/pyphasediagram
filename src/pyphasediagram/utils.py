@@ -110,8 +110,7 @@ def free_energy(phi: ArrayLike, chis: ArrayLike) -> np.ndarray:
         or ``(2, n_points)``. All of :math:`\phi_1`, :math:`\phi_2`, and
         :math:`\phi_0` must be positive.
     chis : array-like
-        Flory--Huggins interaction matrix with shape ``(3, 3)``. An already
-        reduced matrix with shape ``(2, 2)`` is also accepted.
+        Flory--Huggins interaction matrix with shape ``(3, 3)``.
 
     Returns
     -------
@@ -122,7 +121,7 @@ def free_energy(phi: ArrayLike, chis: ArrayLike) -> np.ndarray:
     Raises
     ------
     ValueError
-        If ``chis`` does not have shape ``(3, 3)`` or ``(2, 2)``.
+        If ``chis`` does not have shape ``(3, 3)``.
 
     Notes
     -----
@@ -134,13 +133,20 @@ def free_energy(phi: ArrayLike, chis: ArrayLike) -> np.ndarray:
        f(\boldsymbol{\phi}) = \sum_{i=0}^{2}\phi_i\ln\phi_i
        + \tfrac{1}{2}\boldsymbol{\phi}^{\mathsf{T}} C\boldsymbol{\phi}.
     """
+    if chis.shape != (3, 3):
+        msg = f"chis must have shape (3, 3), but got {chis.shape}"
+        raise ValueError(msg)
+    
     phi = np.asarray(phi, dtype=float)
     reduced_chis = reduce_chis(chis)
+    # assuming that all internal energies are zero (w_i = 0)
+    reduced_w = chis[1:, 0]
     phi_0 = 1.0 - phi.sum(axis=0)
     return (
         np.sum(phi * np.log(phi), axis=0)
         + phi_0 * np.log(phi_0)
         + np.sum(phi * (reduced_chis @ phi), axis=0) / 2
+        + np.transpose(reduced_w * np.transpose(phi))
     )
 
 
@@ -154,8 +160,7 @@ def exchange_chemical_potentials(phi: ArrayLike, chis: ArrayLike) -> np.ndarray:
         or ``(2, n_points)``. All of :math:`\phi_1`, :math:`\phi_2`, and
         :math:`\phi_0` must be positive.
     chis : array-like
-        Flory--Huggins interaction matrix with shape ``(3, 3)``. An already
-        reduced matrix with shape ``(2, 2)`` is also accepted.
+        Flory--Huggins interaction matrix with shape ``(3, 3)``.
 
     Returns
     -------
@@ -167,7 +172,7 @@ def exchange_chemical_potentials(phi: ArrayLike, chis: ArrayLike) -> np.ndarray:
     Raises
     ------
     ValueError
-        If ``chis`` does not have shape ``(3, 3)`` or ``(2, 2)``.
+        If ``chis`` does not have shape ``(3, 3)``.
 
     Notes
     -----
@@ -183,7 +188,13 @@ def exchange_chemical_potentials(phi: ArrayLike, chis: ArrayLike) -> np.ndarray:
     :math:`f = \sum_{i=0}^{2}\phi_i\ln\phi_i
     + \tfrac{1}{2}\boldsymbol{\phi}^{\mathsf{T}} C\boldsymbol{\phi}`.
     """
+    if chis.shape != (3, 3):
+        msg = f"chis must have shape (3, 3), but got {chis.shape}"
+        raise ValueError(msg)
+    
     phi = np.asarray(phi, dtype=float)
     reduced_chis = reduce_chis(chis)
+    # assuming that all internal energies are zero (w_i = 0)
+    reduced_w = chis[1:, 0]
     phi_0 = 1.0 - phi.sum(axis=0)
-    return np.log(phi) - np.log(phi_0) + reduced_chis @ phi
+    return np.log(phi) - np.log(phi_0) + reduced_chis @ phi + np.transpose(reduced_w * np.transpose(np.ones(phi.shape)))
