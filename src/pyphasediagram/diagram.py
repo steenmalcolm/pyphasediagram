@@ -18,7 +18,6 @@ from shapely.geometry.base import BaseGeometry
 
 from pyphasediagram.binodal import Binodal
 from pyphasediagram.spinodal import Spinodal
-from pyphasediagram.utils import reduce_chis
 
 
 def _polygon_exteriors(
@@ -70,7 +69,7 @@ class PhaseDiagram:
     Attributes
     ----------
     chis : numpy.ndarray
-        Reduced interaction matrix with shape ``(2, 2)``.
+        Full interaction matrix with shape ``(3, 3)``.
     spinodal : Spinodal
         Calculated spinodal curve and locally stable polygons. Available after
         :meth:`build` has completed.
@@ -151,12 +150,9 @@ class PhaseDiagram:
     def __init__(self, chis: np.ndarray) -> None:
         chis = np.asarray(chis, dtype=float)
         if chis.shape != (3, 3):
-            msg = (
-                f"PhaseDiagram requires a 3x3 interaction matrix, got shape "
-                f"{chis.shape}"
-            )
+            msg = f"PhaseDiagram requires a 3x3 interaction matrix, got shape {chis.shape}"
             raise ValueError(msg)
-        self.chis = reduce_chis(chis)
+        self.chis = chis.copy()
 
     def build(self) -> None:
         """Build the spinodal and binodal parts of the phase diagram.
@@ -270,11 +266,7 @@ class PhaseDiagram:
         ax.set_tlabel(r"$\phi_0$")
         ax.set_llabel(r"$\phi_1$")
         ax.set_rlabel(r"$\phi_2$")
-        ax.legend(
-            handles=[
-                Patch(facecolor=c, alpha=alphas[l], label=l) for l, c in colors.items()
-            ]
-        )
+        ax.legend(handles=[Patch(facecolor=c, alpha=alphas[l], label=l) for l, c in colors.items()])
 
     def plot(self) -> tuple[Figure, TernaryAxes]:
         """Plot coexistence curves and special points.
@@ -382,16 +374,14 @@ class PhaseDiagram:
         Notes
         -----
         :meth:`build` must be called before this method. The figure title lists
-        the three independent entries of the reduced interaction matrix. A
+        the three independent off-diagonal entries of the full interaction matrix. A
         new figure is created on every call.
         """
-        fig, (ax1, ax2) = plt.subplots(
-            1, 2, figsize=(12, 5), subplot_kw={"projection": "ternary"}
-        )
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5), subplot_kw={"projection": "ternary"})
         fig.suptitle(
             r"$(\chi_{01}, \chi_{02}, \chi_{12}) = "
-            f"({-self.chis[0, 0] / 2:.4f}, {-self.chis[1, 1] / 2:.4f}, "
-            f"{self.chis[0, 1] - self.chis[0, 0] / 2 - self.chis[1, 1] / 2:.4f})$"
+            f"({self.chis[0, 1]:.4f}, {self.chis[0, 2]:.4f}, "
+            f"{self.chis[1, 2]:.4f})$"
         )
         self._draw_phase_diagram(ax1)
         self._draw_phase_counts(ax2)

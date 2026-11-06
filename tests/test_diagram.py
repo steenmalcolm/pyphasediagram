@@ -54,18 +54,12 @@ def diagram_with_plot_data():
     return diagram
 
 
-def test_phase_diagram_reduces_full_interaction_matrix():
-    chis = np.array(
-        [
-            [0.0, 1.0, 2.0],
-            [1.0, 0.0, 3.0],
-            [2.0, 3.0, 0.0],
-        ]
-    )
-
+def test_phase_diagram_copies_full_interaction_matrix():
+    chis = np.array([[0.0, 1.0, 2.0], [1.0, 0.0, 3.0], [2.0, 3.0, 0.0]])
+    expected = chis.copy()
     diagram = PhaseDiagram(chis)
 
-    expected = np.array([[-2.0, 0.0], [0.0, -4.0]])
+    chis[0, 1] = chis[1, 0] = 9.0
     np.testing.assert_array_equal(diagram.chis, expected)
 
 
@@ -101,9 +95,7 @@ def test_build_does_not_duplicate_identical_nodes():
         )
         diagram.build()
 
-    coordinates = [
-        (point.phi1, point.phi2) for point in diagram.spinodal.spinodal_graph
-    ]
+    coordinates = [(point.phi1, point.phi2) for point in diagram.spinodal.spinodal_graph]
     assert len(coordinates) == len(set(coordinates))
 
 
@@ -111,9 +103,7 @@ def test_to_ternary_coordinates_adds_implicit_component():
     phi1 = np.array([0.20, 0.30])
     phi2 = np.array([0.30, 0.10])
 
-    phi0, converted_phi1, converted_phi2 = PhaseDiagram._to_ternary_coordinates(
-        phi1, phi2
-    )
+    phi0, converted_phi1, converted_phi2 = PhaseDiagram._to_ternary_coordinates(phi1, phi2)
 
     np.testing.assert_allclose(phi0, [0.50, 0.60])
     np.testing.assert_array_equal(converted_phi1, phi1)
@@ -135,9 +125,7 @@ def test_polygon_exteriors_recurses_into_geometry_collections():
 
     assert len(exteriors) == 2
     np.testing.assert_array_equal(exteriors[0], np.asarray(polygon.exterior.coords))
-    np.testing.assert_array_equal(
-        exteriors[1], np.asarray(nested_polygon.exterior.coords)
-    )
+    np.testing.assert_array_equal(exteriors[1], np.asarray(nested_polygon.exterior.coords))
 
 
 def test_phase_diagram_plot_uses_phi0_phi1_phi2_axis_order(
@@ -161,9 +149,7 @@ def test_phase_diagram_plot_uses_phi0_phi1_phi2_axis_order(
 
 
 @pytest.mark.parametrize("method_name", ["plot", "plot_phase_counts"])
-def test_phase_diagram_plot_methods_always_create_new_figures(
-    diagram_with_plot_data, method_name
-):
+def test_phase_diagram_plot_methods_always_create_new_figures(diagram_with_plot_data, method_name):
     method = getattr(diagram_with_plot_data, method_name)
 
     first_fig, first_ax = method()
@@ -178,9 +164,7 @@ def test_phase_diagram_plot_methods_always_create_new_figures(
 
 
 @pytest.mark.parametrize("method_name", ["plot", "plot_phase_counts"])
-def test_phase_diagram_plot_methods_do_not_accept_axes(
-    diagram_with_plot_data, method_name
-):
+def test_phase_diagram_plot_methods_do_not_accept_axes(diagram_with_plot_data, method_name):
     method = getattr(diagram_with_plot_data, method_name)
 
     with pytest.raises(TypeError):

@@ -39,7 +39,7 @@ def _make_cycle_subgraph(points):
 
 @pytest.fixture
 def simple_chis():
-    return np.array([[1.0, 0.0], [0.0, 1.0]], dtype=float)
+    return np.array([[0.0, -0.5, -0.5], [-0.5, 0.0, -1.0], [-0.5, -1.0, 0.0]])
 
 
 @pytest.fixture
@@ -62,16 +62,30 @@ def trivial_spinodal_graph():
 def test_spinodal_init(simple_chis):
     sp = Spinodal(simple_chis)
     assert np.allclose(sp.chis, simple_chis)
+    np.testing.assert_allclose(sp.chis_reduced, np.eye(2))
     assert isinstance(sp.spinodal_graph, nx.Graph)
     assert sp.spinodal_graph.number_of_nodes() == 0
     assert sp.node_id == 0
+
+
+def test_spinodal_rejects_reduced_matrix():
+    with pytest.raises(ValueError, match="Expected chis to be a 3x3 matrix"):
+        Spinodal(np.zeros((2, 2)))
+
+
+def test_spinodal_copies_input_matrix(simple_chis):
+    expected = simple_chis.copy()
+    sp = Spinodal(simple_chis)
+    simple_chis[0, 1] = simple_chis[1, 0] = 3.0
+    np.testing.assert_array_equal(sp.chis, expected)
+    np.testing.assert_allclose(sp.chis_reduced, np.eye(2))
 
 
 def test_get_quadratic_coefficients_scalar_matches_manual(simple_chis):
     sp = Spinodal(simple_chis)
     phi = 0.3
 
-    a, b, c = simple_chis[1, 1], simple_chis[0, 0], simple_chis[0, 1]
+    a, b, c = 1.0, 1.0, 0.0  # Reduced coefficients for simple_chis.
     det = a * b - c**2
 
     quadratic_expected = a + det * phi
@@ -85,20 +99,14 @@ def test_get_quadratic_coefficients_scalar_matches_manual(simple_chis):
 
 
 def test_get_quadratic_coefficients_swap_flag_equivalent_to_swapping_a_b():
-    chis = np.array([[1.5, 0.2], [0.2, -0.7]])
+    chis = np.array([[0.0, -0.75, 0.35], [-0.75, 0.0, -0.2], [0.35, -0.2, 0.0]])
     sp = Spinodal(chis)
     phi = 0.42
 
     coefficients = sp._get_quadratic_coefficients(phi, is_calculate_phi2=False)
 
-    # emulate swap a<->b as in code path
-    chis_swapped = np.array(
-        [
-            [chis[1, 1], chis[0, 1]],
-            [chis[1, 0], chis[0, 0]],
-        ],
-        dtype=float,
-    )
+    # Swap independent components 1 and 2, leaving the solvent unchanged.
+    chis_swapped = chis[np.ix_([0, 2, 1], [0, 2, 1])]
     sp_swapped = Spinodal(chis_swapped)
     swapped_coefficients = sp_swapped._get_quadratic_coefficients(phi)
 
@@ -124,7 +132,7 @@ def test_phi2_from_phi1_scalar_returns_scalar_like(simple_chis):
 
 
 def test_phi2_from_phi1_solves_linear_equation_when_quadratic_term_is_zero():
-    chis = np.array([[-2.0, 0.0], [0.0, -4.0]])
+    chis = np.array([[0.0, 1.0, 2.0], [1.0, 0.0, 3.0], [2.0, 3.0, 0.0]])
     spinodal = Spinodal(chis)
 
     quadratic, linear, constant = spinodal._get_quadratic_coefficients(0.5)
@@ -138,7 +146,7 @@ def test_phi2_from_phi1_solves_linear_equation_when_quadratic_term_is_zero():
 
 
 def test_phi2_from_phi1_returns_repeated_quadratic_root_once():
-    spinodal = Spinodal(np.array([[0.0, -3.0], [-3.0, -6.0]]))
+    spinodal = Spinodal(np.array([[0.0, 0.0, 3.0], [0.0, 0.0, 0.0], [3.0, 0.0, 0.0]]))
 
     upper, lower = spinodal._phi2_from_phi1(1.0 / 3.0)
 
@@ -329,7 +337,7 @@ def test_coords_from_subgraph_cycle_contains_all_nodes(simple_chis):
 def test_third_derivative_scalar_matches_eigenvector():
     # At this composition, the Hessian is diag(0, 16 / 3), so its normalized
     # eigenvector of the vanishing eigenvalue is (1, 0).
-    sp = Spinodal(np.array([[-7.0, -2.0], [-2.0, 0.0]]))
+    sp = Spinodal(np.array([[0.0, 3.5, 0.0], [3.5, 0.0, 1.5], [0.0, 1.5, 0.0]]))
     phi1, phi2 = 0.2, 0.3
     phi0 = 1 - phi1 - phi2
     expected = -(1 / phi1**2) + 1 / phi0**2
@@ -339,7 +347,7 @@ def test_third_derivative_scalar_matches_eigenvector():
 
 
 def test_third_derivative_keeps_soft_eigenvector_orientation():
-    sp = Spinodal(np.array([[-5.0, -1.6], [-1.6, -0.2]]))
+    sp = Spinodal(np.array([[0.0, 2.5, 0.1], [2.5, 0.0, 1.0], [0.1, 1.0, 0.0]]))
     phi1 = np.array([0.29409234486384267, 0.29416660403227696])
     phi2 = np.array([0.08079337161470079, 0.08105436146499123])
 
@@ -498,9 +506,9 @@ class TestInDomain:
 @pytest.mark.parametrize(
     ("chis", "expected_endpoint_indices"),
     [
-        pytest.param(np.zeros((2, 2)), [], id="zero-interactions"),
+        pytest.param(np.zeros((3, 3)), [], id="zero-interactions"),
         pytest.param(
-            np.array([[-4.0, -2.0], [-2.0, -4.0]]),
+            np.array([[0.0, 2.0, 2.0], [2.0, 0.0, 2.0], [2.0, 2.0, 0.0]]),
             [33334, 99999],
             id="symmetric-threshold",
         ),
@@ -523,7 +531,7 @@ def test_spinodal_domains_return_finite_interval_pairs(chis, expected_endpoint_i
 
 
 def test_spinodal_domains_include_sample_with_linear_solution():
-    chis = np.array([[-3.0, 0.0], [0.0, -2.0]])
+    chis = np.array([[0.0, 1.5, 1.0], [1.5, 0.0, 2.5], [1.0, 2.5, 0.0]])
     spinodal = Spinodal(chis)
     linear_phi1 = 1.0 / 3.0
 
@@ -697,14 +705,14 @@ import shapely
 
 def _random_chis(rng: np.random.Generator, low=-10.0, high=10.0) -> np.ndarray:
     """
-    Symmetric 2x2 chi matrix with entries in [low, high]:
-        [[chi11, chi12],
-         [chi12, chi22]]
+    Full symmetric matrix whose reduced coefficients are sampled in [low, high].
     """
     chi11 = rng.uniform(low, high)
     chi22 = rng.uniform(low, high)
     chi12 = rng.uniform(low, high)
-    return np.array([[chi11, chi12], [chi12, chi22]], dtype=float)
+    chi01, chi02 = -chi11 / 2, -chi22 / 2
+    chi12 += chi01 + chi02
+    return np.array([[0.0, chi01, chi02], [chi01, 0.0, chi12], [chi02, chi12, 0.0]])
 
 
 def _build_spinodal_or_skip(chis: np.ndarray, num_points=800) -> Spinodal:
@@ -859,7 +867,7 @@ def test_e2e_spinodal_invariants_symmetric_case(chi):
     if chi == 3:
         pytest.skip("Skipping chi=3 due to known numerical issues with 2nd order transition")
 
-    chis = np.array([[-2 * chi, -chi], [-chi, -2 * chi]], dtype=float)
+    chis = np.array([[0.0, chi, chi], [chi, 0.0, chi], [chi, chi, 0.0]])
     sp = _build_spinodal_or_skip(chis, num_points=1000)
     G = sp.spinodal_graph
 

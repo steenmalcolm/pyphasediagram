@@ -123,7 +123,7 @@ class TestBinodalSection:
 class TestBinodalUnit:
     @pytest.fixture
     def chis(self):
-        return np.array([[-5.0, 0.5], [0.5, -5.5]])
+        return np.array([[0.0, 2.5, 2.75], [2.5, 0.0, 5.75], [2.75, 5.75, 0.0]])
 
     def test_init(self, chis):
         b = Binodal(chis)
@@ -155,8 +155,7 @@ class TestBinodalUnit:
         np.testing.assert_allclose(phases, expected_phases)
         phi_1, phi_2 = expected_phases.T
         phi_0 = 1.0 - phi_1 - phi_2
-        c01, c02 = -np.diag(chis) / 2
-        c12 = chis[0, 1] + c01 + c02
+        c01, c02, c12 = chis[0, 1], chis[0, 2], chis[1, 2]
         expected_energies = (
             phi_0 * np.log(phi_0)
             + phi_1 * np.log(phi_1)
@@ -181,8 +180,7 @@ class TestBinodalUnit:
         # Check against the unreduced pair-interaction energy, including solvent.
         phi_1, phi_2 = expected_phases.T
         phi_0 = 1.0 - phi_1 - phi_2
-        c01, c02 = -np.diag(chis) / 2
-        c12 = chis[0, 1] + c01 + c02
+        c01, c02, c12 = chis[0, 1], chis[0, 2], chis[1, 2]
         expected_energies = (
             phi_0 * np.log(phi_0)
             + phi_1 * np.log(phi_1)
@@ -347,40 +345,37 @@ class TestBinodalUnit:
 # ---------------------------------------------------------------------------
 # End-to-end integration tests
 # ---------------------------------------------------------------------------
+def _build_binodal(chis):
+    from pyphasediagram.spinodal import Spinodal
+
+    spinodal = Spinodal(chis)
+    spinodal.build()
+    binodal = Binodal(chis, spinodal.critical_points)
+    binodal.build(unstable_manifold=spinodal.get_unstable_manifold())
+    return binodal
+
+
+@pytest.fixture(scope="class")
+def symmetric_chis():
+    """Symmetric chi matrix: chi_01 = chi_02 = chi_12 = chi."""
+    chi = 2.75
+    return np.array([[0.0, chi, chi], [chi, 0.0, chi], [chi, chi, 0.0]])
+
+
+@pytest.fixture(scope="class")
+def symmetric_binodal(symmetric_chis):
+    """Build the shared symmetric phase diagram once for this test class."""
+    return _build_binodal(symmetric_chis)
+
+
 class TestBinodalEndToEnd:
     """Integration tests that build full spinodal + binodal from chi matrices."""
-
-    @pytest.fixture(scope="class")
-    def symmetric_chis(self):
-        """Symmetric chi matrix: chi_01 = chi_02 = chi_12 = chi."""
-        chi = 2.75
-        chi_11 = -2 * chi
-        chi_22 = -2 * chi
-        chi_12 = chi - chi - chi  # = -chi
-        return np.array([[chi_11, chi_12], [chi_12, chi_22]])
 
     @pytest.fixture
     def asymmetric_chis(self):
         """Asymmetric chi matrix."""
         chi_01, chi_02, chi_12 = 2.65, 2.85, 2.75
-        chi_11 = -2 * chi_01
-        chi_22 = -2 * chi_02
-        chi_12_r = chi_12 - chi_01 - chi_02
-        return np.array([[chi_11, chi_12_r], [chi_12_r, chi_22]])
-
-    def _build_binodal(self, chis):
-        from pyphasediagram.spinodal import Spinodal
-
-        spinodal = Spinodal(chis)
-        spinodal.build()
-        binodal = Binodal(chis, spinodal.critical_points)
-        binodal.build(unstable_manifold=spinodal.get_unstable_manifold())
-        return binodal
-
-    @pytest.fixture(scope="class")
-    def symmetric_binodal(self, symmetric_chis):
-        """Build the shared symmetric phase diagram once for this test class."""
-        return self._build_binodal(symmetric_chis)
+        return np.array([[0.0, chi_01, chi_02], [chi_01, 0.0, chi_12], [chi_02, chi_12, 0.0]])
 
     def test_symmetric_produces_sections(self, symmetric_binodal):
         assert len(symmetric_binodal.binodal_sections) > 0
@@ -412,7 +407,7 @@ class TestBinodalEndToEnd:
                 assert tp.intersection(three).area < 1e-6
 
     def test_asymmetric_produces_sections(self, asymmetric_chis):
-        binodal = self._build_binodal(asymmetric_chis)
+        binodal = _build_binodal(asymmetric_chis)
         assert len(binodal.binodal_sections) > 0
 
     def test_three_phase_polygons_inside_domain(self, symmetric_binodal):
@@ -430,12 +425,9 @@ class TestBinodalEndToEnd:
         chi = 2.75
         spread = 0.4
         chi_01, chi_02, chi_12 = (rng.random(3) - 0.5) * spread + chi
-        chi_11 = -2 * chi_01
-        chi_22 = -2 * chi_02
-        chi_12_r = chi_12 - chi_01 - chi_02
-        chis = np.array([[chi_11, chi_12_r], [chi_12_r, chi_22]])
+        chis = np.array([[0.0, chi_01, chi_02], [chi_01, 0.0, chi_12], [chi_02, chi_12, 0.0]])
         # Should not raise
-        binodal = self._build_binodal(chis)
+        binodal = _build_binodal(chis)
         assert binodal.three_phase_polygons is not None
         assert binodal.two_phase_polygons is not None
 

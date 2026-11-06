@@ -17,7 +17,7 @@ import shapely
 
 from pyphasediagram.point import BinodalInitialPoint, CriticalPoint
 from pyphasediagram.stepper import Stepper
-from pyphasediagram.utils import free_energy
+from pyphasediagram.utils import free_energy, reduce_chis
 
 
 # TODO: Additional duplicate section removal after task list is exhausted and unstable
@@ -349,8 +349,8 @@ class Binodal:
     Parameters
     ----------
     chis : numpy.ndarray
-        Reduced interaction matrix with shape ``(2, 2)`` for the two
-        independent composition coordinates.
+        Full interaction matrix with shape ``(3, 3)`` for the three
+        components of the mixture.
     critical_points : list of CriticalPoint, optional
         Spinodal critical points used as additional initial points for
         tracing coexistence sections.
@@ -360,7 +360,7 @@ class Binodal:
     SV_BRANCH_THRESHOLD : float
         Singular-value threshold used to identify candidate branch points.
     chis : numpy.ndarray
-        Reduced interaction matrix supplied to the constructor.
+        Full interaction matrix supplied to the constructor.
     critical_points : list of CriticalPoint
         Critical-point initial points supplied to the constructor.
     binodal_sections : list of BinodalSection
@@ -384,6 +384,11 @@ class Binodal:
     def __init__(
         self, chis: np.ndarray, critical_points: list[CriticalPoint] | None = None
     ) -> None:
+        chis = np.asarray(chis)
+        if chis.shape != (3, 3):
+            msg = f"Expected a (3, 3) interaction matrix, got shape {chis.shape}"
+            raise ValueError(msg)
+
         if critical_points is None:
             critical_points = []
         self.chis = chis
@@ -391,7 +396,7 @@ class Binodal:
         self.binodal_sections: list[BinodalSection] = []
         self.three_phase_polygons: list[shapely.Polygon] = None
         self.two_phase_polygons: list[shapely.Polygon] = None
-        self._stepper = Stepper(chis)
+        self._stepper = Stepper(reduce_chis(chis, ncomp=len(chis)))
         self._bipt_task_list: list[BinodalInitialPoint] = []
         self._bipt_hist: list[BinodalInitialPoint] = []
 
@@ -765,12 +770,6 @@ class Binodal:
         phi_means = np.asarray(phi_means, dtype=float)
         pt = shapely.Point(phi_means)
 
-        # Recover the full interaction matrix from the reduced
-        # ternary matrix: C_ii = -2 chi_0i and C_12 = chi_12 - chi_01 - chi_02.
-        chi_01, chi_02 = -np.diag(self.chis) / 2
-        chi_12 = self.chis[0, 1] + chi_01 + chi_02
-        chis_full = np.array([[0.0, chi_01, chi_02], [chi_01, 0.0, chi_12], [chi_02, chi_12, 0.0]])
-
         best_result = None
         best_f = np.inf
 
@@ -789,7 +788,7 @@ class Binodal:
                     continue
                 if np.any(vols < -1e-6):
                     continue
-                f = float(sum(v * free_energy(verts[i], chis_full) for i, v in enumerate(vols)))
+                f = float(sum(v * free_energy(verts[i], self.chis) for i, v in enumerate(vols)))
                 if f < best_f:
                     best_f = f
                     best_result = verts
@@ -832,8 +831,8 @@ class Binodal:
 
             # Interpolated free energy at phi_means on this tie line
             alpha = t[idx]
-            f = (1.0 - alpha) * free_energy(phi_a[:, idx], chis_full) + alpha * free_energy(
-                phi_b[:, idx], chis_full
+            f = (1.0 - alpha) * free_energy(phi_a[:, idx], self.chis) + alpha * free_energy(
+                phi_b[:, idx], self.chis
             )
 
             if f < best_f:

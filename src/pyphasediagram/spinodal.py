@@ -18,6 +18,7 @@ import numpy as np
 import shapely
 
 from pyphasediagram.point import CriticalPoint, SpinodalPoint
+from pyphasediagram.utils import reduce_chis
 
 if TYPE_CHECKING:
     from numpy.typing import ArrayLike
@@ -36,13 +37,15 @@ class Spinodal:
     Parameters
     ----------
     chis : numpy.ndarray
-        Reduced interaction matrix with shape ``(2, 2)`` for the two
-        independent composition coordinates.
+        Full symmetric interaction matrix with shape ``(3, 3)`` for the three
+        components of the ternary mixture.
 
     Attributes
     ----------
     chis : numpy.ndarray
-        Reduced interaction matrix with shape ``(2, 2)``.
+        Full symmetric interaction matrix with shape ``(3, 3)``.
+    chis_reduced : numpy.ndarray
+        Reduced interaction matrix with shape ``(2, 2)`` used internally.
     spinodal_graph : networkx.Graph
         Graph whose nodes are
         :class:`~pyphasediagram.point.SpinodalPoint` objects and whose edges
@@ -58,7 +61,7 @@ class Spinodal:
     Raises
     ------
     ValueError
-        If ``chis`` does not have shape ``(2, 2)``.
+        If ``chis`` does not have shape ``(3, 3)``.
 
     Notes
     -----
@@ -68,10 +71,12 @@ class Spinodal:
     """
 
     def __init__(self, chis: np.ndarray) -> None:
-        if chis.shape != (2, 2):
-            msg = f"Expected chis to be a 2x2 matrix, but got shape {chis.shape}"
+        chis = np.asarray(chis, dtype=float)
+        if chis.shape != (3, 3):
+            msg = f"Expected chis to be a 3x3 matrix, but got shape {chis.shape}"
             raise ValueError(msg)
-        self.chis = chis
+        self.chis = chis.copy()
+        self.chis_reduced = reduce_chis(chis, ncomp=len(chis))
         self.spinodal_graph = nx.Graph()
         self.node_id = 0
         self.critical_points = []
@@ -142,7 +147,7 @@ class Spinodal:
         constant : float or numpy.ndarray
             Constant term in ``quadratic*x**2 + linear*x + constant = 0``.
         """
-        a, b, c = self.chis[1, 1], self.chis[0, 0], self.chis[0, 1]
+        a, b, c = self.chis_reduced[1, 1], self.chis_reduced[0, 0], self.chis_reduced[0, 1]
         if not is_calculate_phi2:
             a, b = b, a  # swap a and b if computing phi1 from phi2
 
@@ -158,8 +163,11 @@ class Spinodal:
     ) -> tuple[bool | np.ndarray, bool | np.ndarray]:
         """Classify polynomial samples as quadratic or linear.
 
-        Coefficients smaller than floating-point resolution relative to the
-        polynomial's coefficient scale are treated as zero.
+        For ``a*x**2 + b*x + c = 0``, use the quadratic equation when ``a``
+        is nonzero, or the linear solution ``x = -c/b`` when ``a`` is zero
+        and ``b`` is nonzero. If both are zero, neither mask is set.
+
+        A zero tolerance is based on floating-point resolution.
 
         Returns
         -------
@@ -169,15 +177,7 @@ class Spinodal:
             Samples with a zero quadratic coefficient and nonzero linear
             coefficient.
         """
-        coefficient_scale = np.maximum.reduce(
-            [
-                np.abs(quadratic),
-                np.abs(linear),
-                np.abs(constant),
-                np.ones_like(quadratic, dtype=float),
-            ]
-        )
-        zero_tolerance = 32 * np.finfo(float).eps * coefficient_scale
+        zero_tolerance = 32 * np.finfo(float).eps
         is_quadratic = np.abs(quadratic) > zero_tolerance
         is_linear = ~is_quadratic & (np.abs(linear) > zero_tolerance)
         return is_quadratic, is_linear
@@ -234,9 +234,7 @@ class Spinodal:
         ``NaN`` in both branches.
         """
         quadratic, linear, constant = self._get_quadratic_coefficients(phi1)
-        is_quadratic, is_linear = self._polynomial_degree_masks(
-            quadratic, linear, constant
-        )
+        is_quadratic, is_linear = self._polynomial_degree_masks(quadratic, linear, constant)
 
         upper = np.full_like(quadratic, np.nan, dtype=float)
         lower = np.full_like(quadratic, np.nan, dtype=float)
@@ -269,8 +267,7 @@ class Spinodal:
             # A zero square root gives one distinct composition, not two.
             has_distinct_quadratic_roots = has_real_quadratic_roots & (square_root > 0)
             lower[has_distinct_quadratic_roots] = (
-                -p[has_distinct_quadratic_roots] / 2
-                - square_root[has_distinct_quadratic_roots]
+                -p[has_distinct_quadratic_roots] / 2 - square_root[has_distinct_quadratic_roots]
             )
 
             linear_root = np.divide(
@@ -310,9 +307,9 @@ class Spinodal:
         lead to divisions by zero.
         """
         phi0 = 1 - phi1 - phi2
-        H_11 = 1 / phi1 + 1 / phi0 + self.chis[0, 0]
-        H_22 = 1 / phi2 + 1 / phi0 + self.chis[1, 1]
-        H_12 = 1 / phi0 + self.chis[0, 1]
+        H_11 = 1 / phi1 + 1 / phi0 + self.chis_reduced[0, 0]
+        H_22 = 1 / phi2 + 1 / phi0 + self.chis_reduced[1, 1]
+        H_12 = 1 / phi0 + self.chis_reduced[0, 1]
 
         trace = H_11 + H_22
         det = H_11 * H_22 - H_12**2
@@ -322,9 +319,7 @@ class Spinodal:
 
         return eigenvalue1, eigenvalue2
 
-    def _domain_data(
-        self, phi1_i: float, phi1_f: float, num_points: int = 5000
-    ) -> None:
+    def _domain_data(self, phi1_i: float, phi1_f: float, num_points: int = 5000) -> None:
         """Sample two spinodal branches over a ``phi1`` interval.
 
         Parameters
@@ -391,20 +386,13 @@ class Spinodal:
         phi1_vals = np.linspace(0, 1, 100000)
 
         quadratic, linear, constant = self._get_quadratic_coefficients(phi1_vals)
-        is_quadratic, is_linear = self._polynomial_degree_masks(
-            quadratic, linear, constant
-        )
-        finite_coefficients = (
-            np.isfinite(quadratic) & np.isfinite(linear) & np.isfinite(constant)
-        )
+        is_quadratic, is_linear = self._polynomial_degree_masks(quadratic, linear, constant)
+        finite_coefficients = np.isfinite(quadratic) & np.isfinite(linear) & np.isfinite(constant)
         with np.errstate(invalid="ignore", over="ignore"):
             discriminant = linear**2 - 4 * quadratic * constant
 
         has_real_quadratic_roots = (
-            finite_coefficients
-            & is_quadratic
-            & np.isfinite(discriminant)
-            & (discriminant >= 0)
+            finite_coefficients & is_quadratic & np.isfinite(discriminant) & (discriminant >= 0)
         )
         has_real_linear_root = finite_coefficients & is_linear
         has_real_solutions = has_real_quadratic_roots | has_real_linear_root
@@ -467,11 +455,7 @@ class Spinodal:
         """
         if self.spinodal_graph.number_of_nodes() == 0:
             return
-        to_remove = [
-            n
-            for n in self.spinodal_graph.nodes()
-            if not self._in_domain(n.phi1, n.phi2)
-        ]
+        to_remove = [n for n in self.spinodal_graph.nodes() if not self._in_domain(n.phi1, n.phi2)]
         self.spinodal_graph.remove_nodes_from(to_remove)
 
         # Edge case remove subgraphs with single point
@@ -505,9 +489,7 @@ class Spinodal:
 
         # Endpoints have degree 1
         endpoints = [
-            pt
-            for pt in self.spinodal_graph.nodes()
-            if self.spinodal_graph.degree[pt] == 1
+            pt for pt in self.spinodal_graph.nodes() if self.spinodal_graph.degree[pt] == 1
         ]
         # Keep track of endpoints we've already connected to avoid adding multiple edges
         # from the same endpoint in cases where more than 2 branches are close together.
@@ -525,9 +507,7 @@ class Spinodal:
                 if dist < 0.05:
                     nb_epti = next(self.spinodal_graph.neighbors(epti))
                     nb_eptj = next(self.spinodal_graph.neighbors(eptj))
-                    if eptj.is_between(nb_eptj, epti) and epti.is_between(
-                        nb_epti, eptj
-                    ):
+                    if eptj.is_between(nb_eptj, epti) and epti.is_between(nb_epti, eptj):
                         self.spinodal_graph.add_edge(epti, eptj)
                         invalid_endpoints.extend([epti, eptj])
 
@@ -593,9 +573,9 @@ class Spinodal:
         """
         phi1, phi2 = np.asarray(phi1, dtype=float), np.asarray(phi2, dtype=float)
         phi0 = 1 - phi1 - phi2
-        H_11 = 1 / phi1 + 1 / phi0 + self.chis[0, 0]
-        H_22 = 1 / phi2 + 1 / phi0 + self.chis[1, 1]
-        H_12 = 1 / phi0 + self.chis[0, 1]
+        H_11 = 1 / phi1 + 1 / phi0 + self.chis_reduced[0, 0]
+        H_22 = 1 / phi2 + 1 / phi0 + self.chis_reduced[1, 1]
+        H_12 = 1 / phi0 + self.chis_reduced[0, 1]
 
         H = np.stack(
             (
@@ -659,10 +639,7 @@ class Spinodal:
 
             third_deriv = self._third_derivative(phi1, phi2)
             if np.isnan(third_deriv).any():
-                msg = (
-                    "NaN values found in third derivative, check for invalid phi1/phi2 "
-                    "values."
-                )
+                msg = "NaN values found in third derivative, check for invalid phi1/phi2 values."
                 raise ValueError(msg)
             # Edge case where third derivative has extrema at root
             extrema_idxs = np.where(np.diff(np.sign(np.diff(third_deriv))))[0] + 1
@@ -671,9 +648,7 @@ class Spinodal:
                     phi1_c, phi2_c = phi1[extrema_idx], phi2[extrema_idx]
                     dphi1 = phi1[extrema_idx + 1] - phi1[extrema_idx - 1]
                     dphi2 = phi2[extrema_idx + 1] - phi2[extrema_idx - 1]
-                    self.critical_points.append(
-                        CriticalPoint(-1, phi1_c, phi2_c, dphi1, dphi2)
-                    )
+                    self.critical_points.append(CriticalPoint(-1, phi1_c, phi2_c, dphi1, dphi2))
 
             # Find roots of third derivative
             root_idxs = np.where(np.diff(np.sign(third_deriv)))[0]
@@ -701,14 +676,12 @@ class Spinodal:
                     msg = (
                         f"Third derivative at critical point ({phi1_c:.2f}, "
                         f"{phi2_c:.2f}) is not close to zero: {td_c:.5f}\n"
-                        f"(chi_11, chi_22, chi_12)=({self.chis[0, 0]}, "
-                        f"{self.chis[1, 1]}, {self.chis[0, 1]})\n"
+                        f"(chi_01, chi_02, chi_12)=({self.chis[0, 1]}, "
+                        f"{self.chis[0, 2]}, {self.chis[1, 2]})\n"
                         f"Try increasing resolution of spinodal curve."
                     )
                     raise RuntimeError(msg)
-                self.critical_points.append(
-                    CriticalPoint(-1, phi1_c, phi2_c, dphi1, dphi2)
-                )
+                self.critical_points.append(CriticalPoint(-1, phi1_c, phi2_c, dphi1, dphi2))
 
     def _build_polygons(self) -> None:
         """Construct locally stable polygons from spinodal graph components.
@@ -769,17 +742,11 @@ class Spinodal:
             if len(endpoints) == 2:
                 for i, e in enumerate(endpoints):
                     if e.phi1 < 1e-2:
-                        is_add_corner[i] += (1 << 0) + (
-                            1 << 1
-                        )  # add corners (0,0) and (0,1)
+                        is_add_corner[i] += (1 << 0) + (1 << 1)  # add corners (0,0) and (0,1)
                     if e.phi2 < 1e-2:
-                        is_add_corner[i] += (1 << 0) + (
-                            1 << 2
-                        )  # add corners (0,0) and (1,0)
+                        is_add_corner[i] += (1 << 0) + (1 << 2)  # add corners (0,0) and (1,0)
                     if e.phi1 + e.phi2 > 1 - 1e-2:
-                        is_add_corner[i] += (1 << 1) + (
-                            1 << 2
-                        )  # add corners (0,1) and (1,0)
+                        is_add_corner[i] += (1 << 1) + (1 << 2)  # add corners (0,1) and (1,0)
                 # Remove the corner which both endpoints have in common. This guarantees
                 # that if both endpoints are on the same edge, we don't add any corners
                 # and if they are on different edges we add the correct corners such
@@ -868,10 +835,8 @@ class Spinodal:
         The method sets the title, axis limits, labels, legend, and the
         ``phi1 + phi2 = 1`` boundary on the current Matplotlib axes.
         """
-        a, b, c = self.chis[0, 0], self.chis[1, 1], self.chis[0, 1]
-        plt.title(
-            r"$(\chi_{11}, \chi_{22}, \chi_{12})$ = " + f"({a:.5f}, {b:.5f}, {c:.5f})"
-        )
+        a, b, c = self.chis_reduced[0, 0], self.chis_reduced[1, 1], self.chis_reduced[0, 1]
+        plt.title(r"$(\chi_{11}, \chi_{22}, \chi_{12})$ = " + f"({a:.5f}, {b:.5f}, {c:.5f})")
         ls = kwargs.get("linestyle", "--")
         has_plotted_spinodal = False
         for comp in nx.connected_components(self.spinodal_graph):
@@ -913,8 +878,7 @@ if __name__ == "__main__":
     while i < 100:
         n = time.perf_counter()
         chi_dr, chi_rs, chi_ds = np.random.uniform(-10, 10, size=3)
-        chi_11, chi_22, chi_12 = -2 * chi_ds, -2 * chi_rs, chi_dr - chi_rs - chi_ds
-        chis = np.array([[chi_11, chi_12], [chi_12, chi_22]])
+        chis = np.array([[0.0, chi_ds, chi_rs], [chi_ds, 0.0, chi_dr], [chi_rs, chi_dr, 0.0]])
         spinodal = Spinodal(chis)
         spinodal.build()  # Monitor this method call
         u_poly = spinodal.get_unstable_manifold()
@@ -926,7 +890,5 @@ if __name__ == "__main__":
             continue
         plt.savefig(f"delete/{i}.png")
         plt.close()
-        print(
-            f"Completed iteration {i + 1}/100 in {time.perf_counter() - n:.2f} seconds."
-        )
+        print(f"Completed iteration {i + 1}/100 in {time.perf_counter() - n:.2f} seconds.")
         i += 1
