@@ -380,9 +380,9 @@ def main():
 
             _set_alarm(args.timeout)
             try:
-                spinodal = Spinodal(chis_reduced)
+                spinodal = Spinodal(chis_3x3)
                 spinodal.build()
-                binodal = Binodal(chis_reduced, spinodal.critical_points)
+                binodal = Binodal(chis_3x3, spinodal.critical_points)
                 binodal.build(unstable_manifold=spinodal.get_unstable_manifold())
                 _cancel_alarm()
             except _Timeout:
@@ -552,11 +552,11 @@ def _plot_phase_diagram(spinodal, binodal, ax):
 def analyze_flory_wins(flory_wins: list[dict]):
     """Rebuild each flory-win diagram and plot binodal vs flory tie lines."""
     for i, fw in enumerate(flory_wins):
-        chis_reduced = np.array(fw["chis_reduced"])
+        chis_3x3 = np.array(fw["chis_3x3"])
 
-        spinodal = Spinodal(chis_reduced)
+        spinodal = Spinodal(chis_3x3)
         spinodal.build()
-        binodal = Binodal(chis_reduced, spinodal.critical_points)
+        binodal = Binodal(chis_3x3, spinodal.critical_points)
         binodal.build(unstable_manifold=spinodal.get_unstable_manifold())
 
         _, ax = plt.subplots(figsize=(6, 6))

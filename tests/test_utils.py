@@ -20,6 +20,22 @@ def chis_reduced(chis_full):
     return np.array([[-2 * chi_01, off], [off, -2 * chi_02]])
 
 
+@pytest.fixture
+def phi():
+    return np.array([0.2, 0.3])
+
+
+@pytest.fixture
+def phis():
+    return np.array([[0.1, 0.3, 0.5], [0.2, 0.4, 0.1]])
+
+
+@pytest.fixture
+def compositions(phi, phis):
+    """Single composition and batches of one, two, and three compositions."""
+    return [phi, phi[:, None], phis[:, :2], phis]
+
+
 # ---------------------------------------------------------------------------
 # reduce_chis
 # ---------------------------------------------------------------------------
@@ -109,35 +125,36 @@ class TestReduceChis:
 # free_energy
 # ---------------------------------------------------------------------------
 class TestFreeEnergy:
-    def test_ideal_mixture_value(self):
+    def test_ideal_mixture_value(self, phi):
         """With zero interactions, f is the ideal entropy of mixing."""
-        phi = np.array([0.2, 0.3])
         expected = 0.2 * np.log(0.2) + 0.3 * np.log(0.3) + 0.5 * np.log(0.5)
         assert np.isclose(free_energy(phi, np.zeros((3, 3))), expected)
 
-    def test_interaction_term_has_factor_one_half(self, chis_reduced):
-        phi = np.array([0.2, 0.3])
-        ideal = free_energy(phi, np.zeros((2, 2)))
-        interaction = 0.5 * phi @ chis_reduced @ phi
-        assert np.isclose(free_energy(phi, chis_reduced), ideal + interaction)
+    def test_known_value_with_interactions(self, chis_full, compositions):
+        """Compare with the full ternary free energy, including solvent interactions."""
+        for phi in compositions:
+            phi_0 = 1.0 - phi.sum(axis=0)
+            ideal = phi_0 * np.log(phi_0) + np.sum(phi * np.log(phi), axis=0)
+            interaction = (
+                chis_full[0, 1] * phi_0 * phi[0]
+                + chis_full[0, 2] * phi_0 * phi[1]
+                + chis_full[1, 2] * phi[0] * phi[1]
+            )
+            actual = free_energy(phi, chis_full)
+            assert actual.shape == phi.shape[1:]
+            np.testing.assert_allclose(actual, ideal + interaction)
 
-    def test_full_and_reduced_chis_agree(self, chis_full, chis_reduced):
-        phi = np.array([0.25, 0.35])
-        assert np.isclose(free_energy(phi, chis_full), free_energy(phi, chis_reduced))
+    def test_single_composition_is_scalar(self, chis_full, phi):
+        assert np.ndim(free_energy(phi, chis_full)) == 0
 
-    def test_single_composition_is_scalar(self, chis_full):
-        assert np.ndim(free_energy([0.2, 0.3], chis_full)) == 0
-
-    def test_vectorized_matches_loop(self, chis_full):
-        phis = np.array([[0.1, 0.3, 0.5], [0.2, 0.4, 0.1]])  # (2, 3)
+    def test_vectorized_matches_loop(self, chis_full, phis):
         f = free_energy(phis, chis_full)
         assert f.shape == (3,)
         for k in range(3):
             assert np.isclose(f[k], free_energy(phis[:, k], chis_full))
 
-    def test_gradient_is_exchange_chemical_potential(self, chis_full):
+    def test_gradient_is_exchange_chemical_potential(self, chis_full, phi):
         """mu_i - mu_0 = df/dphi_i."""
-        phi = np.array([0.2, 0.3])
         h = 1e-6
         grad = np.array(
             [
@@ -148,48 +165,48 @@ class TestFreeEnergy:
         )
         assert np.allclose(grad, exchange_chemical_potentials(phi, chis_full), atol=1e-6)
 
-    def test_rejects_invalid_chis_shape(self):
-        with pytest.raises(ValueError, match="must have shape"):
-            free_energy([0.2, 0.3], np.zeros((4, 4)))
-
 
 # ---------------------------------------------------------------------------
 # exchange_chemical_potentials
 # ---------------------------------------------------------------------------
 class TestExchangeChemicalPotentials:
-    def test_ideal_mixture_value(self):
-        phi = np.array([0.2, 0.3])
+    def test_ideal_mixture_value(self, phi):
         mu = exchange_chemical_potentials(phi, np.zeros((3, 3)))
         assert np.allclose(mu, np.log(phi) - np.log(0.5))
 
-    def test_known_value_with_interactions(self, chis_reduced):
-        phi = np.array([0.2, 0.3])
-        expected = np.log(phi) - np.log(0.5) + chis_reduced @ phi
-        assert np.allclose(exchange_chemical_potentials(phi, chis_reduced), expected)
+    def test_known_value_with_interactions(self, chis_full, compositions):
+        """Differentiate the full ternary interaction energy relative to the solvent."""
+        for phi in compositions:
+            phi_0 = 1.0 - phi.sum(axis=0)
+            solvent_interaction = chis_full[0, 1] * phi[0] + chis_full[0, 2] * phi[1]
+            expected = (
+                np.log(phi)
+                - np.log(phi_0)
+                + np.array(
+                    [
+                        chis_full[0, 1] * phi_0 + chis_full[1, 2] * phi[1],
+                        chis_full[0, 2] * phi_0 + chis_full[1, 2] * phi[0],
+                    ]
+                )
+                - solvent_interaction
+            )
+            actual = exchange_chemical_potentials(phi, chis_full)
+            assert actual.shape == phi.shape
+            np.testing.assert_allclose(actual, expected)
 
-    def test_full_and_reduced_chis_agree(self, chis_full, chis_reduced):
-        phi = np.array([0.25, 0.35])
-        assert np.allclose(
-            exchange_chemical_potentials(phi, chis_full),
-            exchange_chemical_potentials(phi, chis_reduced),
-        )
-
-    def test_output_shape_matches_input(self, chis_full):
-        assert exchange_chemical_potentials([0.2, 0.3], chis_full).shape == (2,)
-        phis = np.array([[0.1, 0.3, 0.5], [0.2, 0.4, 0.1]])
+    def test_output_shape_matches_input(self, chis_full, phi, phis):
+        assert exchange_chemical_potentials(phi, chis_full).shape == (2,)
         assert exchange_chemical_potentials(phis, chis_full).shape == (2, 3)
 
-    def test_vectorized_matches_loop(self, chis_full):
-        phis = np.array([[0.1, 0.3, 0.5], [0.2, 0.4, 0.1]])
+    def test_vectorized_matches_loop(self, chis_full, phis):
         mu = exchange_chemical_potentials(phis, chis_full)
         for k in range(3):
             assert np.allclose(mu[:, k], exchange_chemical_potentials(phis[:, k], chis_full))
 
-    def test_matches_stepper_residual(self, chis_full):
+    def test_matches_stepper_residual(self, chis_full, phis):
         """The difference between two phases equals the stepper's chemical-potential
         residual."""
-        phi_a = np.array([0.1, 0.2])
-        phi_b = np.array([0.3, 0.4])
+        phi_a, phi_b = phis[:, 0], phis[:, 1]
         stepper = Stepper(reduce_chis(chis_full))
         residual = np.asarray(stepper.residual(np.concatenate([phi_a, phi_b])))
         delta_mu = exchange_chemical_potentials(phi_a, chis_full) - exchange_chemical_potentials(
@@ -197,6 +214,22 @@ class TestExchangeChemicalPotentials:
         )
         assert np.allclose(residual[:2], delta_mu)
 
-    def test_rejects_invalid_chis_shape(self):
-        with pytest.raises(ValueError, match="must have shape"):
-            exchange_chemical_potentials([0.2, 0.3], np.zeros((4, 4)))
+
+@pytest.mark.parametrize("function", [free_energy, exchange_chemical_potentials])
+@pytest.mark.parametrize("shape", [(2, 2), (4, 4), (3, 2), (2, 3), (3,), (9,), ()])
+def test_thermodynamic_functions_reject_invalid_chis_shape(function, shape, phi):
+    with pytest.raises(ValueError, match=r"chis must have shape \(3, 3\)"):
+        function(phi, np.zeros(shape))
+
+
+@pytest.mark.parametrize("function", [free_energy, exchange_chemical_potentials])
+def test_thermodynamic_functions_reject_reduced_chis(function, chis_reduced, phi):
+    with pytest.raises(ValueError, match=r"chis must have shape \(3, 3\)"):
+        function(phi, chis_reduced.tolist())
+
+
+@pytest.mark.parametrize("function", [free_energy, exchange_chemical_potentials])
+def test_thermodynamic_functions_accept_nested_lists(function, chis_full, compositions):
+    for phi in compositions:
+        actual = function(phi.tolist(), chis_full.tolist())
+        np.testing.assert_allclose(actual, function(phi, chis_full))

@@ -17,7 +17,7 @@ import shapely
 
 from pyphasediagram.point import BinodalInitialPoint, CriticalPoint
 from pyphasediagram.stepper import Stepper
-from pyphasediagram.utils import free_energy
+from pyphasediagram.utils import free_energy, reduce_chis
 
 
 # TODO: Additional duplicate section removal after task list is exhausted and unstable
@@ -116,9 +116,7 @@ class BinodalSection:
             )
 
     @staticmethod
-    def _interpolate_on_segment(
-        coords: np.ndarray, point: shapely.Point
-    ) -> tuple[int, float]:
+    def _interpolate_on_segment(coords: np.ndarray, point: shapely.Point) -> tuple[int, float]:
         r"""Locate a point on the nearest segment of a polyline.
 
         Parameters
@@ -242,9 +240,7 @@ class BinodalSection:
         interpolation along both paired branches.
         """
         if not isinstance(other, BinodalSection):
-            msg = (
-                "intersects_with can only be computed between BinodalSection instances."
-            )
+            msg = "intersects_with can only be computed between BinodalSection instances."
             raise NotImplementedError(msg)
 
         tp_points = []
@@ -254,15 +250,15 @@ class BinodalSection:
                 other_other_idx = 1 - other_idx
                 params = self._intersection_params(self_idx, other, other_idx)
                 for seg1, t1, seg2, t2 in params:
-                    self_phi_a = (1 - t1) * self.phis[
-                        self_idx, :, seg1
-                    ] + t1 * self.phis[self_idx, :, seg1 + 1]
-                    self_phi_b = (1 - t1) * self.phis[
-                        other_self_idx, :, seg1
-                    ] + t1 * self.phis[other_self_idx, :, seg1 + 1]
-                    other_phi = (1 - t2) * other.phis[
-                        other_other_idx, :, seg2
-                    ] + t2 * other.phis[other_other_idx, :, seg2 + 1]
+                    self_phi_a = (1 - t1) * self.phis[self_idx, :, seg1] + t1 * self.phis[
+                        self_idx, :, seg1 + 1
+                    ]
+                    self_phi_b = (1 - t1) * self.phis[other_self_idx, :, seg1] + t1 * self.phis[
+                        other_self_idx, :, seg1 + 1
+                    ]
+                    other_phi = (1 - t2) * other.phis[other_other_idx, :, seg2] + t2 * other.phis[
+                        other_other_idx, :, seg2 + 1
+                    ]
                     tp_points.append((self_phi_a, self_phi_b, other_phi))
 
         return tp_points
@@ -311,9 +307,7 @@ class BinodalSection:
                 return True
         return False
 
-    def _degenerate_points(
-        self, sv_branch_threshold: float = 1e-2
-    ) -> list[BinodalInitialPoint]:
+    def _degenerate_points(self, sv_branch_threshold: float = 1e-2) -> list[BinodalInitialPoint]:
         """Find candidate branching points from singular-value minima.
 
         Parameters
@@ -340,10 +334,7 @@ class BinodalSection:
         for idx in extrema_idx:
             if self.svs[idx] < sv_branch_threshold:
                 phi_init = self.phis[:, :, idx].flatten()
-                v_init = (
-                    self.phis[:, :, idx + 1].flatten()
-                    - self.phis[:, :, idx - 1].flatten()
-                )
+                v_init = self.phis[:, :, idx + 1].flatten() - self.phis[:, :, idx - 1].flatten()
                 degenerate_points.append(BinodalInitialPoint(phi_init, v_init))
         return degenerate_points
 
@@ -358,8 +349,8 @@ class Binodal:
     Parameters
     ----------
     chis : numpy.ndarray
-        Reduced interaction matrix with shape ``(2, 2)`` for the two
-        independent composition coordinates.
+        Full interaction matrix with shape ``(3, 3)`` for the three
+        components of the mixture.
     critical_points : list of CriticalPoint, optional
         Spinodal critical points used as additional initial points for
         tracing coexistence sections.
@@ -369,7 +360,7 @@ class Binodal:
     SV_BRANCH_THRESHOLD : float
         Singular-value threshold used to identify candidate branch points.
     chis : numpy.ndarray
-        Reduced interaction matrix supplied to the constructor.
+        Full interaction matrix supplied to the constructor.
     critical_points : list of CriticalPoint
         Critical-point initial points supplied to the constructor.
     binodal_sections : list of BinodalSection
@@ -393,6 +384,11 @@ class Binodal:
     def __init__(
         self, chis: np.ndarray, critical_points: list[CriticalPoint] | None = None
     ) -> None:
+        chis = np.asarray(chis)
+        if chis.shape != (3, 3):
+            msg = f"Expected a (3, 3) interaction matrix, got shape {chis.shape}"
+            raise ValueError(msg)
+
         if critical_points is None:
             critical_points = []
         self.chis = chis
@@ -400,7 +396,7 @@ class Binodal:
         self.binodal_sections: list[BinodalSection] = []
         self.three_phase_polygons: list[shapely.Polygon] = None
         self.two_phase_polygons: list[shapely.Polygon] = None
-        self._stepper = Stepper(chis)
+        self._stepper = Stepper(reduce_chis(chis, ncomp=len(chis)))
         self._bipt_task_list: list[BinodalInitialPoint] = []
         self._bipt_hist: list[BinodalInitialPoint] = []
 
@@ -527,9 +523,7 @@ class Binodal:
                 unique_sections.append(section)
         self.binodal_sections = unique_sections
 
-    def _find_branching_points(
-        self, section: BinodalSection
-    ) -> list[BinodalInitialPoint]:
+    def _find_branching_points(self, section: BinodalSection) -> list[BinodalInitialPoint]:
         """Refine branch-point candidates from a binodal section.
 
         Parameters
@@ -673,9 +667,7 @@ class Binodal:
                     self.two_phase_polygons.remove(tp_poly)
                 self.two_phase_polygons.append(poly)
 
-    def _remove_unstable_sections(
-        self, unstable_manifold: shapely.Polygon | None = None
-    ) -> None:
+    def _remove_unstable_sections(self, unstable_manifold: shapely.Polygon | None = None) -> None:
         """Remove trace samples that enter a locally unstable region.
 
         Parameters
@@ -718,15 +710,11 @@ class Binodal:
             stable_indices = np.where(stable_mask)[0]
             if len(stable_indices) < 2:
                 continue
-            segments = np.split(
-                stable_indices, np.where(np.diff(stable_indices) > 1)[0] + 1
-            )
+            segments = np.split(stable_indices, np.where(np.diff(stable_indices) > 1)[0] + 1)
             for seg in segments:
                 if len(seg) < 2:
                     continue
-                stable_sections.append(
-                    BinodalSection(section.phis[:, :, seg], section.svs[seg])
-                )
+                stable_sections.append(BinodalSection(section.phis[:, :, seg], section.svs[seg]))
 
         self.binodal_sections = stable_sections
 
@@ -800,11 +788,7 @@ class Binodal:
                     continue
                 if np.any(vols < -1e-6):
                     continue
-                f = float(
-                    sum(
-                        v * free_energy(verts[i], self.chis) for i, v in enumerate(vols)
-                    )
-                )
+                f = float(sum(v * free_energy(verts[i], self.chis) for i, v in enumerate(vols)))
                 if f < best_f:
                     best_f = f
                     best_result = verts
@@ -847,9 +831,9 @@ class Binodal:
 
             # Interpolated free energy at phi_means on this tie line
             alpha = t[idx]
-            f = (1.0 - alpha) * free_energy(
-                phi_a[:, idx], self.chis
-            ) + alpha * free_energy(phi_b[:, idx], self.chis)
+            f = (1.0 - alpha) * free_energy(phi_a[:, idx], self.chis) + alpha * free_energy(
+                phi_b[:, idx], self.chis
+            )
 
             if f < best_f:
                 best_f = f
@@ -904,18 +888,14 @@ class Binodal:
         for i, tp_poly in enumerate(self.three_phase_polygons):
             x, y = tp_poly.exterior.xy
             if i == 0:
-                plt.fill(
-                    x, y, color="blue", alpha=0.5, label="3-phase region", **kwargs
-                )
+                plt.fill(x, y, color="blue", alpha=0.5, label="3-phase region", **kwargs)
             else:
                 plt.fill(x, y, color="blue", alpha=0.5, **kwargs)
 
         for i, tp_poly in enumerate(self.two_phase_polygons):
             x, y = tp_poly.exterior.xy
             if i == 0:
-                plt.fill(
-                    x, y, color="orange", alpha=0.5, label="2-phase region", **kwargs
-                )
+                plt.fill(x, y, color="orange", alpha=0.5, label="2-phase region", **kwargs)
             else:
                 plt.fill(x, y, color="orange", alpha=0.5, **kwargs)
                 plt.fill(x, y, color="orange", alpha=0.5, **kwargs)
