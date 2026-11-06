@@ -138,6 +138,62 @@ class TestBinodalUnit:
         assert len(b.critical_points) == 1
         assert b.critical_points[0] is cp
 
+    def test_two_phase_decomposition_returns_full_free_energy(self, chis):
+        b = Binodal(chis)
+        phi_a = np.array([[0.10, 0.15], [0.20, 0.25]])
+        phi_b = np.array([[0.60, 0.55], [0.10, 0.15]])
+        b.binodal_sections = [_make_section(phi_a, phi_b)]
+        b.three_phase_polygons = []
+        weights = np.array([0.25, 0.75])
+
+        phases, energy = b.decomposition_from_composition(
+            weights[0] * phi_a[:, 0] + weights[1] * phi_b[:, 0]
+        )
+
+        assert phases.shape == (2, 2)
+        expected_phases = np.stack([phi_a[:, 0], phi_b[:, 0]])
+        np.testing.assert_allclose(phases, expected_phases)
+        phi_1, phi_2 = expected_phases.T
+        phi_0 = 1.0 - phi_1 - phi_2
+        c01, c02 = -np.diag(chis) / 2
+        c12 = chis[0, 1] + c01 + c02
+        expected_energies = (
+            phi_0 * np.log(phi_0)
+            + phi_1 * np.log(phi_1)
+            + phi_2 * np.log(phi_2)
+            + c01 * phi_0 * phi_1
+            + c02 * phi_0 * phi_2
+            + c12 * phi_1 * phi_2
+        )
+        assert np.ndim(energy) == 0
+        np.testing.assert_allclose(energy, weights @ expected_energies)
+
+    def test_three_phase_decomposition_returns_full_free_energy(self, chis):
+        b = Binodal(chis)
+        expected_phases = np.array([[0.1, 0.1], [0.7, 0.1], [0.1, 0.7]])
+        b.three_phase_polygons = [shapely.Polygon(expected_phases)]
+        weights = np.array([0.45, 0.25, 0.30])
+
+        phases, energy = b.decomposition_from_composition(weights @ expected_phases)
+
+        assert phases.shape == (3, 2)
+        np.testing.assert_allclose(phases, expected_phases)
+        # Check against the unreduced pair-interaction energy, including solvent.
+        phi_1, phi_2 = expected_phases.T
+        phi_0 = 1.0 - phi_1 - phi_2
+        c01, c02 = -np.diag(chis) / 2
+        c12 = chis[0, 1] + c01 + c02
+        expected_energies = (
+            phi_0 * np.log(phi_0)
+            + phi_1 * np.log(phi_1)
+            + phi_2 * np.log(phi_2)
+            + c01 * phi_0 * phi_1
+            + c02 * phi_0 * phi_2
+            + c12 * phi_1 * phi_2
+        )
+        assert np.ndim(energy) == 0
+        np.testing.assert_allclose(energy, weights @ expected_energies)
+
     def test_find_three_phase_polygons_empty(self, chis):
         """No sections → no three-phase polygons."""
         b = Binodal(chis)
@@ -227,8 +283,7 @@ class TestBinodalUnit:
                 p1 = sec.phis[0, :, i]
                 p2 = sec.phis[1, :, i]
                 assert not (
-                    manifold.contains(shapely.Point(p1))
-                    and manifold.contains(shapely.Point(p2))
+                    manifold.contains(shapely.Point(p1)) and manifold.contains(shapely.Point(p2))
                 )
 
     def test_remove_unstable_sections_splits_into_two(self, chis):
@@ -275,9 +330,7 @@ class TestBinodalUnit:
                 pa = shapely.Point(sec.phis[0, :, end_idx])
                 pb = shapely.Point(sec.phis[1, :, end_idx])
                 dists.append(min(boundary.distance(pa), boundary.distance(pb)))
-            assert min(dists) < 2 * step, (
-                f"No endpoint close to manifold boundary: dists={dists}"
-            )
+            assert min(dists) < 2 * step, f"No endpoint close to manifold boundary: dists={dists}"
 
     def test_duplicate_three_phase_polygons_filtered(self, chis):
         """Near-duplicate three-phase polygons should be deduplicated."""
@@ -347,9 +400,7 @@ class TestBinodalEndToEnd:
                 phi2 = sec.phis[phase, 1]
                 assert np.all(phi1 >= -1e-10), f"phi1 negative: {phi1.min()}"
                 assert np.all(phi2 >= -1e-10), f"phi2 negative: {phi2.min()}"
-                assert np.all(phi1 + phi2 <= 1 + 1e-10), (
-                    f"phi1+phi2 > 1: {(phi1 + phi2).max()}"
-                )
+                assert np.all(phi1 + phi2 <= 1 + 1e-10), f"phi1+phi2 > 1: {(phi1 + phi2).max()}"
 
     def test_phase_polygons_populated(self, symmetric_binodal):
         assert symmetric_binodal.three_phase_polygons is not None
@@ -368,9 +419,9 @@ class TestBinodalEndToEnd:
         """Three-phase polygon vertices should be inside the Gibbs triangle."""
         domain = shapely.Polygon([(0, 0), (1, 0), (0, 1)])
         for poly in symmetric_binodal.three_phase_polygons:
-            assert domain.contains(poly) or domain.intersection(
-                poly
-            ).area == pytest.approx(poly.area, abs=1e-6)
+            assert domain.contains(poly) or domain.intersection(poly).area == pytest.approx(
+                poly.area, abs=1e-6
+            )
 
     @pytest.mark.parametrize("seed", [0, 1, 2, 3, 4])
     def test_random_chi_builds_without_error(self, seed):

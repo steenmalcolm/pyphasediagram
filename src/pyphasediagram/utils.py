@@ -131,12 +131,17 @@ def free_energy(phi: ArrayLike, chis: ArrayLike) -> np.ndarray:
     .. math::
 
        f(\boldsymbol{\phi}) = \sum_{i=0}^{2}\phi_i\ln\phi_i
-       + \tfrac{1}{2}\boldsymbol{\phi}^{\mathsf{T}} C\boldsymbol{\phi}.
+       + \tfrac{1}{2}\boldsymbol{\phi}^{\mathsf{T}} C\boldsymbol{\phi}
+       + \sum_{i=1}^{2}\chi_{0i}\phi_i.
+
+    The linear term retains the full-system interaction energy
+    :math:`\sum_{i<j}\chi_{ij}\phi_i\phi_j` after eliminating the solvent.
     """
+    chis = np.asarray(chis, dtype=float)
     if chis.shape != (3, 3):
         msg = f"chis must have shape (3, 3), but got {chis.shape}"
         raise ValueError(msg)
-    
+
     phi = np.asarray(phi, dtype=float)
     reduced_chis = reduce_chis(chis)
     # assuming that all internal energies are zero (w_i = 0)
@@ -146,7 +151,7 @@ def free_energy(phi: ArrayLike, chis: ArrayLike) -> np.ndarray:
         np.sum(phi * np.log(phi), axis=0)
         + phi_0 * np.log(phi_0)
         + np.sum(phi * (reduced_chis @ phi), axis=0) / 2
-        + np.transpose(reduced_w * np.transpose(phi))
+        + reduced_w @ phi
     )
 
 
@@ -180,21 +185,29 @@ def exchange_chemical_potentials(phi: ArrayLike, chis: ArrayLike) -> np.ndarray:
 
     .. math::
 
-       \mu_i - \mu_0 = \ln\phi_i - \ln\phi_0 + (C\boldsymbol{\phi})_i,
+       \mu_i - \mu_0 = \ln\phi_i - \ln\phi_0 + (C\boldsymbol{\phi})_i
+       + \chi_{0i},
        \qquad i \in \{1, 2\},
 
     which is the derivative :math:`\partial f / \partial \phi_i` of the
     free-energy density
     :math:`f = \sum_{i=0}^{2}\phi_i\ln\phi_i
-    + \tfrac{1}{2}\boldsymbol{\phi}^{\mathsf{T}} C\boldsymbol{\phi}`.
+    + \tfrac{1}{2}\boldsymbol{\phi}^{\mathsf{T}} C\boldsymbol{\phi}
+    + \sum_{i=1}^{2}\chi_{0i}\phi_i`.
     """
+    chis = np.asarray(chis, dtype=float)
     if chis.shape != (3, 3):
         msg = f"chis must have shape (3, 3), but got {chis.shape}"
         raise ValueError(msg)
-    
+
     phi = np.asarray(phi, dtype=float)
     reduced_chis = reduce_chis(chis)
     # assuming that all internal energies are zero (w_i = 0)
     reduced_w = chis[1:, 0]
     phi_0 = 1.0 - phi.sum(axis=0)
-    return np.log(phi) - np.log(phi_0) + reduced_chis @ phi + np.transpose(reduced_w * np.transpose(np.ones(phi.shape)))
+    return (
+        np.log(phi)
+        - np.log(phi_0)
+        + reduced_chis @ phi
+        + np.transpose(reduced_w * np.transpose(np.ones(phi.shape)))
+    )
