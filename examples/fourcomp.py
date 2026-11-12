@@ -164,14 +164,19 @@ if __name__ == "__main__":
 
     num_comp = 4  # Set number of components
     chis = [
-        [0, 1.9, 1.0, 1.0],
-        [1.9, 0, 3.2, 1.0],
-        [1.0, 3.2, 0, 2.7],
-        [1.0, 1.0, 2.7, 0],
+        [0.0, 1.9, 0.5, 5.0],
+        [1.9, 0.0, 0.0, -1.6],
+        [0.5, 0.0, 0.0, 0.9],
+        [5.0, -1.6, 0.9, 0.0],
     ]  # Set the \chi matrix
-    phi_means0 = [0.49, 0.49, 0.01]  # Start in dilute phi1 and phi3 limit
-    phi_means0 = [1 - sum(phi_means0), *phi_means0]
-    phi0_bar = 0.01
+    chis = [
+        [0.0, -1.6, 0.9, 5.0],
+        [-1.6, 0.0, 0.0, 1.9],
+        [0.9, 0.0, 0.0, 0.5],
+        [5.0, 1.9, 0.5, 0.0],
+    ]
+    # Keep phi1 dilute
+    phi2_bar = 0.01
 
     fig = plt.figure()
     ax = fig.add_subplot(projection="3d")
@@ -184,10 +189,9 @@ if __name__ == "__main__":
         label=r"$\phi_0 = 0$",
     )
 
-    for phi3_bar in np.linspace(0.01, 0.49, 10):
-        print(f"phi3_bar: {phi3_bar:.2f}")
-        phii_bar = (1 - phi0_bar - phi3_bar) / 2
-        phi_means = [phi0_bar, phii_bar, phii_bar, phi3_bar]
+    for i, phi1_bar in enumerate(np.linspace(0.01, 0.99, 10)):
+        phii_bar = (1 - phi2_bar - phi1_bar) / 2
+        phi_means = [phii_bar, phi1_bar, phi2_bar, phii_bar]
         if sum(phi_means) != 1 and any(phi < 0 for phi in phi_means):
             msg = "Invalid composition"
             raise ValueError(msg)
@@ -200,19 +204,25 @@ if __name__ == "__main__":
         # construct a finder from interaction, entropy and ensemble
         finder = flory.CoexistingPhasesFinder(fh.interaction, fh.entropy, ensemble)
         # obtain phases by clustering compartments
-        phases = finder.run().get_clusters()
+        phases = finder.run(progress=False).get_clusters()
 
         phis_init = np.array(phases.fractions[:, 1:]).flatten()
+        if len(phis_init) != 6:
+            continue
         # Initialize the direction away from the physically admissible boundary
         v_init = -np.sign(phis_init - 0.5)
         stepper = FourCompStepper(chis)
         phis, svs, flags = stepper.run(phis_init, v_init)
-        print("flags:", flags)
 
-        for phase, label in enumerate(("Phase A", "Phase B")):
-            ax.plot(*phis[phase])
-            ax.scatter(*phis[phase, :, 0])
+        for phase in [0, 1]:
+            if i == 0 and phase == 0:
+                ax.plot(*phis[phase], color="C0", label="binodal")
+            ax.plot(*phis[phase], color="C0")
+        if i == 0:
+            ax.scatter(*phis[0, :, -1], color="red", s=25, label="critical point")
+        ax.scatter(*phis[0, :, -1], color="red", s=25)
 
     ax.set(xlabel=r"$\phi_1$", ylabel=r"$\phi_2$", zlabel=r"$\phi_3$")
+    ax.view_init(elev=64, azim=147, roll=-125)
     ax.legend()
     plt.show()
