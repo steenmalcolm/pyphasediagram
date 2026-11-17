@@ -45,7 +45,7 @@ The exact requirements for this document can be found [here](https://joss.readth
   - Rich topological features in phase diagram
   - etc.
 
-- the coexistence states for neighboring interaction parameter or compositions can inform about the dynamics of the system (Stefans paper).
+- the coexistence states for neighboring interaction parameter or compositions can inform about the dynamics of the system [@Kostler2026].
 - repeated `flory` equilibrium calculations are expensive for this purpose.
 - organize branches, discover critical points, and identify three-phase regions.
 - target users: researchers studying multicomponent phase separation in soft matter and liquid mixtures.
@@ -97,10 +97,10 @@ The exact requirements for this document can be found [here](https://joss.readth
 
 # Research impact statement
 
-- Already used in @Kostler2026
+- Already used in [@Kostler2026]
 - Used in various internal projects to generate 3-component phase diagrams
 - We are in exchange with other groups, who want to use the software
-- Basis for future work, e.g., to classify all possible topologies of 3-component mixtures
+- Basis for future work, e.g., to classify all possible topologies of 3-component mixtures, or look at ternary slices of higher dimensional phase diagrams
 
 # AI usage disclosure
 
@@ -115,5 +115,6 @@ Figure sizes can be customized by adding an optional second parameter:
 
 # Acknowledgements
 Yicheng Qiang
+Aniruddha Chattaraj (for critical testing)
 
 # References
