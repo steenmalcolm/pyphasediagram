@@ -28,6 +28,9 @@ The exact requirements for this document can be found [here](https://joss.readth
 
 # Summary
 
+Multicomponent mixtures can separate into phases with different coexisting compositions, as e. g. observed in the demixing of water and oil.
+
+
 - mixtures can separate into phases with different compositions, as in oil-water demixing.
 - according to Gibbs law two or three phases can coexist in ternary sytstems.
 - `pyphasediagram` constructs and visualizes ternary diagrams for incompressible Flory–Huggins mixtures.
@@ -37,6 +40,11 @@ The exact requirements for this document can be found [here](https://joss.readth
 - coexistence curves represented as explicit objects.
 
 # Statement of need
+
+Finding these coexisting compositions is vital in many areas of physics, biology and chemistry.
+However, many widely used methods are very time-consuming, because they need to scan a large part of the composition space [put some examples here: convex hull, flory, ...].
+The algorithm presented in this work sidesteps this problem by tracing out the binodal line directly.
+This allows for fast exploration of various parameters leading to different phase diagrams.
 
 - Why three components: simple binary Flory–Huggins models have one independent composition and can be reduced to implicit coexistence relations. Ternary mixtures have two independent composition fields, making them a minimal setting for additional multicomponent effects.
 - These effects include:
