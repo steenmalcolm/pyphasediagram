@@ -37,48 +37,6 @@ def plot_multiple_phase_diagrams(parameter_sets, colors=None):
     parameter_sets: list of dictionaries, e.g.
 
         [
-            {"chi_dr": 1.0, "chi_ds": 2.3, "chi_rs": 1.0},
-            {"chi_dr": 1.0, "chi_ds": 2.5, "chi_rs": 1.0},
-            {"chi_dr": 1.0, "chi_ds": 2.8, "chi_rs": 1.0},
-        ]
-    """
-    if len(colors) == 0:
-        colors = plt.cm.rainbow(np.linspace(0.05, 0.8, len(parameter_sets)))
-
-    fig = plt.figure(figsize=(8, 6))
-    ax = fig.add_subplot(111, projection="ternary")
-
-    ax.set_tlabel(r"$\phi_0$", fontsize=20)
-    ax.set_llabel(r"$\phi_1$", fontsize=20)
-    ax.set_rlabel(r"$\phi_2$", fontsize=20)
-
-    ax.grid(True, color="0.8", linestyle="--", linewidth=0.6)
-
-    legend_handles = []
-
-    for color, params in zip(colors, parameter_sets):
-        diagram = build_phase_diagram(
-            chi_dr=params["chi_dr"], chi_ds=params["chi_ds"], chi_rs=params["chi_rs"]
-        )
-
-        label = (
-            rf"$\chi_{{dr}}={params['chi_dr']:.1f},\ "
-            rf"\chi_{{ds}}={params['chi_ds']:.1f},\ "
-            rf"\chi_{{rs}}={params['chi_rs']:.1f}$"
-        )
-
-
-
-
-
-def plot_multiple_phase_diagrams(parameter_sets, colors=None):
-    """
-    Overlay multiple binodal and spinodal phase diagrams
-    on the same ternary axes.
-
-    parameter_sets: list of dictionaries, e.g.
-
-        [
             {"chi_AB": 1.0, "chi_AS": 2.3, "chi_BS": 1.0},
             {"chi_AB": 1.0, "chi_AS": 2.5, "chi_BS": 1.0},
         ]
