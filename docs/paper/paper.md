@@ -41,10 +41,12 @@ Multicomponent mixtures can separate into phases with different coexisting compo
 
 # Statement of need
 
-Finding these coexisting compositions is vital in many areas of physics, biology and chemistry.
+Phase diagrams are vital in many areas of soft matter, and chemical and material engineering, because they describe the equilibrium behavior of multicomponent mixtures.
 However, many widely used methods are very time-consuming, because they need to scan a large part of the composition space [put some examples here: convex hull, flory, ...].
-The algorithm presented in this work sidesteps this problem by tracing out the binodal line directly.
-This allows for fast exploration of various parameters leading to different phase diagrams.
+The algorithm presented in this work sidesteps this problem by tracing out the coexistence line directly, starting from a known point of phase-coexistence.
+This offers significant speed-up for ternary systems, allowing for fast exploration of ternary phase diagrams for large sets of interaction parameters.
+Coexistence compositions, critical points and three-phase-coexistence regions are identified and categorized conveniently.
+
 
 - Why three components: simple binary Flory–Huggins models have one independent composition and can be reduced to implicit coexistence relations. Ternary mixtures have two independent composition fields, making them a minimal setting for additional multicomponent effects.
 - These effects include:
