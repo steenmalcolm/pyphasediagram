@@ -5,10 +5,10 @@ from matplotlib.lines import Line2D
 
 import pyphasediagram as ppd
 
-
 # An example to show the effect of a parameter scanning on phase diagram
 
-# System has two components: A & B, and solvent (S) 
+# System has two components: A & B, and solvent (S)
+
 
 def _to_ternary(phi1, phi2):
     """
@@ -26,7 +26,6 @@ def build_phase_diagram(chi_AB, chi_AS, chi_BS):
     diagram.build()
 
     return diagram
-
 
 
 def plot_multiple_phase_diagrams(parameter_sets, colors=None):
@@ -101,7 +100,14 @@ def plot_multiple_phase_diagrams(parameter_sets, colors=None):
                 t0, t1, t2 = _to_ternary(phi1s, phi2s)
 
                 ax.scatter(
-                    t0, t1, t2, color=color, s=45, edgecolor="black", linewidth=0.5, zorder=5
+                    t0,
+                    t1,
+                    t2,
+                    color=color,
+                    s=45,
+                    edgecolor="black",
+                    linewidth=0.5,
+                    zorder=5,
                 )
 
         # Critical points

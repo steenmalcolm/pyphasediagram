@@ -543,10 +543,6 @@ def test_spinodal_domains_include_sample_with_linear_solution():
     assert any(start <= linear_phi1 <= stop for start, stop in domains)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="corner masks are added arithmetically and can index past DOMAIN_CORNERS",
-)
 def test_build_polygons_handles_endpoints_near_simplex_corners(simple_chis):
     """Endpoints satisfying two boundary conditions must not corrupt masks."""
     spinodal = Spinodal(simple_chis)
@@ -560,6 +556,70 @@ def test_build_polygons_handles_endpoints_near_simplex_corners(simple_chis):
     spinodal._build_polygons()
 
     assert isinstance(spinodal.polygons, list)
+
+
+@pytest.mark.parametrize("chi", [2.001, 2.01, 2.1, 2.5, 3.0, 4.0, 5.0, 7.5, 10.0, 20.0])
+def test_build_polygons_selects_stable_sides_of_open_branches(chi):
+    """
+    For this type of chi matrix the spinodals are straight lines.
+    Straight spinodals at phi1 = (1 ± sqrt(1 - 2/chi))/2 enclose an unstable strip.
+    """
+    import shapely
+
+    chi_matrix = np.array([[0.0, chi, 0.0], [chi, 0.0, chi], [0.0, chi, 0.0]])
+    spinodal = Spinodal(chi_matrix)
+    phi1_lower = 0.5 * (1 - np.sqrt(1 - 2 / chi))
+    phi1_upper = 0.5 * (1 + np.sqrt(1 - 2 / chi))
+    for i, phi1 in enumerate((phi1_lower, phi1_upper)):
+        points = [
+            SpinodalPoint(3 * i + j, phi1, phi2)
+            for j, phi2 in enumerate((0.001, (1 - phi1) / 2, 1 - phi1 - 0.001))
+        ]
+        spinodal.spinodal_graph.update(_make_path_subgraph(points))
+
+    spinodal._build_polygons()
+
+    stable = shapely.unary_union(spinodal.polygons)
+    unstable = spinodal.get_unstable_manifold()
+    for phi1, expected_stable in (
+        (phi1_lower / 2, True),
+        (0.5, False),
+        ((1 + phi1_upper) / 2, True),
+    ):
+        point = shapely.Point(phi1, (1 - phi1) / 2)
+        assert stable.contains(point) == expected_stable
+        assert unstable.contains(point) != expected_stable
+    np.testing.assert_allclose(unstable.area, (phi1_upper - phi1_lower) / 2)
+    # Unstable and stable area should sum to the total physically admissible domain
+    np.testing.assert_allclose(stable.area + unstable.area, 0.5)
+
+
+@pytest.mark.parametrize("stable_inside", [False, True])
+def test_build_polygons_selects_stable_side_of_closed_loop(monkeypatch, simple_chis, stable_inside):
+    """The stable side can be either the interior or the exterior of a ring."""
+    import shapely
+
+    spinodal = Spinodal(simple_chis)
+    angles = np.linspace(0, 2 * np.pi, 101)[:-1]
+    points = [
+        SpinodalPoint(i, 0.3 + 0.1 * np.cos(angle), 0.3 + 0.1 * np.sin(angle))
+        for i, angle in enumerate(angles)
+    ]
+    spinodal.spinodal_graph = _make_cycle_subgraph(points)
+
+    def eigenvalues(phi1, phi2):
+        distance = np.sqrt((phi1 - 0.3) ** 2 + (phi2 - 0.3) ** 2) - 0.1
+        # First return value does not matter for this test
+        return 1.0, -distance if stable_inside else distance
+
+    monkeypatch.setattr(spinodal, "eigenvalues_from_phi", eigenvalues)
+    spinodal._build_polygons()
+
+    assert len(spinodal.polygons) == 1
+    stable = spinodal.polygons[0]
+    assert stable.contains(shapely.Point(0.3, 0.3)) == stable_inside
+    assert stable.contains(shapely.Point(0.05, 0.05)) != stable_inside
+    assert stable.is_valid
 
 
 def test_build_replaces_previous_state(monkeypatch, simple_chis):

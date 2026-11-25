@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
 import shapely
+import shapely.ops
 
 from pyphasediagram.point import CriticalPoint, SpinodalPoint
 from pyphasediagram.utils import reduce_chis
@@ -147,7 +148,11 @@ class Spinodal:
         constant : float or numpy.ndarray
             Constant term in ``quadratic*x**2 + linear*x + constant = 0``.
         """
-        a, b, c = self.chis_reduced[1, 1], self.chis_reduced[0, 0], self.chis_reduced[0, 1]
+        a, b, c = (
+            self.chis_reduced[1, 1],
+            self.chis_reduced[0, 0],
+            self.chis_reduced[0, 1],
+        )
         if not is_calculate_phi2:
             a, b = b, a  # swap a and b if computing phi1 from phi2
 
@@ -692,35 +697,34 @@ class Spinodal:
 
         Notes
         -----
-        Open branches are extended to nearby admissible domain boundaries and, when
-        necessary, through a simplex corner. Candidate polygons are classified
-        from the Hessian eigenvalues at their centroids; polygons enclosing a
-        locally unstable centroid are complemented against the full simplex.
-        Overlapping stable polygons are intersected. The resulting geometries
-        replace :attr:`polygons`.
+        Open branches are extended to the admissible domain boundary. Nearby
+        points on either side of each branch are checked for positive Hessian
+        eigenvalues. The physical domain is split along the branch, and the region
+        containing the stable point is retained. Closed branches are treated
+        as rings. Branches with no locally stable side are skipped.
 
-        Components with fewer than three coordinates or an invalid polygon
-        emit a message and are skipped.
+        Overlapping stable polygons are intersected.
         """
         self.polygons = []
 
-        # If needed, store which corner to add to which endpoint
+        # Small offset ensures that shapely.ops.split does not fail due to points lying slightly
+        # within the domain boundary due to floating-point errors.
+        boundary_offset = 1e-10
 
         for comp_idx, comp in enumerate(nx.connected_components(self.spinodal_graph)):
             sg = self.spinodal_graph.subgraph(comp).copy()
 
-            # Add boundary point if endpoint is close to boundary, such that polygons
-            # don't cut through unstable region.
+            # Extend just beyond the boundary so rounding does not prevent a split.
             endpoints = [n for n, d in sg.degree() if d == 1]
             if len(endpoints) == 2:
                 for e in endpoints:
                     boundary_point = None
                     if e.phi1 < 1e-2:
-                        boundary_point = SpinodalPoint(-1, 0, e.phi2)
+                        boundary_point = SpinodalPoint(-1, -boundary_offset, e.phi2)
                     elif e.phi2 < 1e-2:
-                        boundary_point = SpinodalPoint(-1, e.phi1, 0)
+                        boundary_point = SpinodalPoint(-1, e.phi1, -boundary_offset)
                     elif e.phi1 + e.phi2 > 1 - 1e-2:
-                        boundary_point = SpinodalPoint(-1, e.phi1, 1 - e.phi1)
+                        boundary_point = SpinodalPoint(-1, e.phi1, 1 - e.phi1 + boundary_offset)
                     else:
                         # Edge case where displacement between e and its neighbor is
                         # vertical, such that the resolution is quite bad
@@ -730,66 +734,72 @@ class Spinodal:
                         if angle_from_vertical < 0.01:
                             # angle is less than 0.01 radians (~0.57 degrees)
                             if d[1] < 0:
-                                boundary_point = SpinodalPoint(-1, e.phi1, 0)
+                                boundary_point = SpinodalPoint(-1, e.phi1, -boundary_offset)
                             else:
-                                boundary_point = SpinodalPoint(-1, e.phi1, 1 - e.phi1)
+                                boundary_point = SpinodalPoint(
+                                    -1, e.phi1, 1 - e.phi1 + boundary_offset
+                                )
                     if boundary_point is not None:
                         sg.add_node(boundary_point)
                         sg.add_edge(e, boundary_point)
-            endpoints = [n for n, d in sg.degree() if d == 1]
-
-            is_add_corner = [0, 0]
-            if len(endpoints) == 2:
-                for i, e in enumerate(endpoints):
-                    if e.phi1 < 1e-2:
-                        is_add_corner[i] += (1 << 0) + (1 << 1)  # add corners (0,0) and (0,1)
-                    if e.phi2 < 1e-2:
-                        is_add_corner[i] += (1 << 0) + (1 << 2)  # add corners (0,0) and (1,0)
-                    if e.phi1 + e.phi2 > 1 - 1e-2:
-                        is_add_corner[i] += (1 << 1) + (1 << 2)  # add corners (0,1) and (1,0)
-                # Remove the corner which both endpoints have in common. This guarantees
-                # that if both endpoints are on the same edge, we don't add any corners
-                # and if they are on different edges we add the correct corners such
-                # that the polygon encloses the locally stable area of the domain
-                common_corners = is_add_corner[0] & is_add_corner[1]
-                if is_add_corner[0] ^ is_add_corner[1] > 0:
-                    corner = DOMAIN_CORNERS[common_corners.bit_length() - 1]
-                    sg.add_node(SpinodalPoint(-1, corner[0], corner[1]))
-                    sg.add_edge(endpoints[0], SpinodalPoint(-1, corner[0], corner[1]))
-
             phi1, phi2 = self._coords_from_subgraph(sg)
             coords = np.column_stack((phi1, phi2))
-            if len(coords) >= 3:  # Need at least 3 points to form a polygon
-                poly = shapely.make_valid(shapely.geometry.Polygon(coords))
-                if poly.is_valid:
-                    center = poly.centroid
-                    ev1, ev2 = self.eigenvalues_from_phi(center.x, center.y)
-                    if ev1 < 0 and ev2 < 0:
-                        continue
-
-                    if ev1 * ev2 < 0:
-                        poly = shapely.geometry.Polygon(DOMAIN_CORNERS).difference(poly)
-                    for other in self.polygons:
-                        if poly.intersects(other):
-                            # Edge case where overlap is a line or point
-                            if poly.intersection(other).area < 1e-10:
-                                continue
-                            poly = poly.intersection(other)
-                            # Remove the other polygon from the list since it's now
-                            # merged with the current one
-                            self.polygons.remove(other)
-                            break
-                    self.polygons.append(poly)
-                else:
-                    print(
-                        "Warning: Invalid polygon formed from spinodal component, "
-                        "skipping polygon creation for this component."
-                    )
-            else:
+            if len(coords) < 3:
                 print(
                     "Warning: Not enough points to form a polygon for this spinodal "
                     "component, skipping polygon creation for this component."
                 )
+                continue
+            # Ring
+            if not endpoints:
+                coords = np.vstack((coords, coords[0]))
+            spinodal_line = shapely.geometry.LineString(coords)
+            domain_polygon = shapely.geometry.Polygon(DOMAIN_CORNERS)
+
+            # Probe both sides of the curve along the normal direction.
+            stable_point = None
+            # Iterate over spinodal line until a stable point is found
+            for i in range(1, len(coords) - 1):
+                tangent = coords[i + 1] - coords[i - 1]
+                normal = np.array([-tangent[1], tangent[0]]) / np.linalg.norm(tangent)
+
+                for sign in (-1, 1):
+                    point = coords[i] + sign * normal * 1e-4
+                    if not self._in_domain(*point):
+                        continue
+                    _, eigenvalue_min = self.eigenvalues_from_phi(*point)
+                    if eigenvalue_min > 0:
+                        stable_point = shapely.geometry.Point(point)
+                        break
+                if stable_point is not None:
+                    break
+            # Both sides of the spinodal are unstable
+            if stable_point is None:
+                continue
+
+            regions = shapely.ops.split(domain_polygon, spinodal_line).geoms
+            if len(regions) < 2:
+                print(
+                    "Warning: Spinodal component does not split the domain, "
+                    "skipping polygon creation for this component."
+                )
+                continue
+            for region in regions:
+                if region.contains(stable_point):
+                    poly = region
+                    break
+            else:
+                continue
+
+            for other in self.polygons:
+                if poly.intersects(other):
+                    # Edge case where overlap is a line or point
+                    if poly.intersection(other).area < 1e-10:
+                        continue
+                    poly = poly.intersection(other)
+                    self.polygons.remove(other)
+                    break
+            self.polygons.append(poly)
 
     def get_unstable_manifold(self) -> shapely.geometry.Polygon | None:
         """Return the locally unstable region of the composition simplex.
@@ -835,7 +845,11 @@ class Spinodal:
         The method sets the title, axis limits, labels, legend, and the
         ``phi1 + phi2 = 1`` boundary on the current Matplotlib axes.
         """
-        a, b, c = self.chis_reduced[0, 0], self.chis_reduced[1, 1], self.chis_reduced[0, 1]
+        a, b, c = (
+            self.chis_reduced[0, 0],
+            self.chis_reduced[1, 1],
+            self.chis_reduced[0, 1],
+        )
         plt.title(r"$(\chi_{11}, \chi_{22}, \chi_{12})$ = " + f"({a:.5f}, {b:.5f}, {c:.5f})")
         ls = kwargs.get("linestyle", "--")
         has_plotted_spinodal = False
